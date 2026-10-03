@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "components": [
+    {
+      "name": "Pico-SPC-Player backend and native renderer",
+      "sourceProject": "Pico-SPC-Player",
+      "baseRevision": "51824a68120d5c49fbc9d6df04568ced7e9a8ec8",
+      "license": "MIT",
+      "localPaths": [
+        "native/backend",
+        "native/tools"
+      ],
+      "licensePath": "LICENSE",
+      "localModifications": "Browser integration through the WebAssembly C ABI and copied visual snapshots."
+    },
+    {
+      "name": "snes_spc",
+      "source": "https://github.com/blarggs-audio-libraries/snes_spc",
+      "upstreamCommit": "ec8ee2bbe30451614c1d02a83f7af1c97d497d45",
+      "license": "LGPL-2.1-or-later",
+      "localPath": "native/vendor/snes_spc",
+      "licensePath": "LICENSES/LGPL-2.1.txt",
+      "localModifications": "Copy-only ARAM, DSP and voice snapshots; optional SPC700 and S-DSP ARAM access activity and byte heatmap hooks."
+    }
+  ]
+}

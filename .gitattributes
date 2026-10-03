@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.wasm binary
+*.zip binary
+# Retain imported source and license formatting.
+native/vendor/snes_spc/** -whitespace
+LICENSES/** -whitespace

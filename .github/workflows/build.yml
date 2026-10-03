@@ -1,0 +1,64 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y cmake ninja-build emscripten
+          npm install --global pnpm@11.19.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - name: Native checks
+        run: |
+          for configuration in Release Debug; do
+            directory="native/build-${configuration,,}"
+            cmake -S native -B "$directory" -G Ninja -DCMAKE_BUILD_TYPE="$configuration"
+            cmake --build "$directory"
+            ctest --test-dir "$directory" --output-on-failure
+          done
+      - run: pnpm build:release
+      - name: WebAssembly and worklet checks
+        run: |
+          pnpm test:wasm
+          pnpm test:protocol
+          pnpm test:parity
+      - name: Browser checks
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          node scripts/serve-dist.mjs > /tmp/spc-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid"' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ > /dev/null
+          pnpm test:browser
+          pnpm test:data-views
+          pnpm test:underlay-layout
+          pnpm test:waterfall-retention
+          pnpm test:waterfall
+      - uses: actions/upload-artifact@v7
+        with:
+          name: visual-spc-player-standalone
+          path: release/
+          if-no-files-found: error

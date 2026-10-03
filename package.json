@@ -1,0 +1,44 @@
+{
+  "name": "visual-spc-player",
+  "version": "0.1.0",
+  "description": "Local SPC audio player and live SPC700 memory visualizer",
+  "license": "MIT",
+  "engines": { "node": ">=24" },
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "node scripts/build-wasm.mjs && tsc -b && vite build",
+    "build:single": "node scripts/build-wasm.mjs && tsc -b && vite build && node scripts/build-single-html.mjs",
+    "build:release": "pnpm build:single && node scripts/package-release.mjs",
+    "typecheck": "tsc -b",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "test:wasm": "node scripts/verify-wasm.mjs",
+    "test:protocol": "node scripts/protocol-smoke.mjs",
+    "test:parity": "node scripts/verify-parity.mjs",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:waterfall": "node scripts/waterfall-smoke.mjs",
+    "test:waterfall-retention": "node scripts/waterfall-retention-smoke.mjs",
+    "test:underlay-layout": "node scripts/activity-underlay-layout-smoke.mjs",
+    "test:data-views": "node scripts/data-views-smoke.mjs",
+    "test:endurance": "node scripts/endurance-smoke.mjs",
+    "test:watch": "vitest",
+    "build:native": "node scripts/build-wasm.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.1.1",
+    "vite": "8.3.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "jsdom": "30.0.1",
+    "playwright": "1.62.1"
+  },
+  "packageManager": "pnpm@11.19.0"
+}

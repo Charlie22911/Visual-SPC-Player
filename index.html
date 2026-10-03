@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Play local SPC files and inspect live SPC700 memory." />
+    <meta name="theme-color" content="#070b14" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <title>Visual SPC Player</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      if (location.protocol === 'file:') {
+        document.getElementById('root').innerHTML = '<main style="max-width:42rem;margin:4rem auto;padding:1.5rem;color:#e8f3ff;background:#0b1422;border:1px solid #24354d;border-radius:12px;font:16px/1.55 system-ui,sans-serif"><h1 style="margin-top:0">Open the standalone player</h1><p>This file is the development entry page. For direct offline use, open <strong>Visual-SPC-Player.html</strong> from the same folder.</p><p><a style="color:#72f0d4" href="./Visual-SPC-Player.html">Open Visual-SPC-Player.html</a></p></main>';
+      }
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
