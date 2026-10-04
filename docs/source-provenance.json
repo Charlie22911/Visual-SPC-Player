@@ -57,7 +57,6 @@
       "author": "Emscripten authors",
       "license": "MIT OR NCSA",
       "licensePath": "LICENSES/Emscripten.txt",
-      "attributionPath": "LICENSES/Emscripten-AUTHORS.txt",
       "use": "Linked WebAssembly runtime support."
     },
     {
@@ -76,16 +75,7 @@
       "version": "LLVM 13.0.0 with Emscripten modifications",
       "author": "LLVM Project contributors",
       "license": "Apache-2.0 WITH LLVM-exception, with original component notices retained",
-      "licensePaths": [
-        "LICENSES/LLVM-libcxx.txt",
-        "LICENSES/LLVM-libcxxabi.txt",
-        "LICENSES/LLVM-compiler-rt.txt"
-      ],
-      "attributionPaths": [
-        "LICENSES/LLVM-libcxx-CREDITS.txt",
-        "LICENSES/LLVM-libcxxabi-CREDITS.txt",
-        "LICENSES/LLVM-compiler-rt-CREDITS.txt"
-      ],
+      "licensePath": "LICENSES/LLVM.txt",
       "use": "C++ and compiler runtime support linked into WebAssembly."
     },
     {

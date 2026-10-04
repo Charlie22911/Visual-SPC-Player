@@ -1,3 +1,12 @@
+LLVM runtime notices
+
+Components: libc++, libc++abi, and compiler-rt from Emscripten 3.1.6.
+The common license terms below apply to all three components.
+Upstream contributor records (CREDITS.TXT):
+https://github.com/emscripten-core/emscripten/blob/3.1.6/system/lib/libcxx/CREDITS.TXT
+https://github.com/emscripten-core/emscripten/blob/3.1.6/system/lib/libcxxabi/CREDITS.TXT
+https://github.com/emscripten-core/emscripten/blob/3.1.6/system/lib/compiler-rt/CREDITS.TXT
+
 ==============================================================================
 The LLVM Project is under the Apache License v2.0 with LLVM Exceptions:
 ==============================================================================
@@ -234,17 +243,12 @@ mechanisms:
    file.
 
 ==============================================================================
-Legacy LLVM License (https://llvm.org/docs/DeveloperPolicy.html#legacy):
+Legacy component licenses
 ==============================================================================
 
-The compiler_rt library is dual licensed under both the University of Illinois
-"BSD-Like" license and the MIT license.  As a user of this code you may choose
-to use it under either license.  As a contributor, you agree to allow your code
-to be used under both.
-
-Full text of the relevant licenses is included below.
-
-==============================================================================
+These libraries are also dual licensed under the University of Illinois/NCSA
+and MIT licenses. The common NCSA terms and each component's MIT copyright
+notice are retained below.
 
 University of Illinois/NCSA
 Open Source License
@@ -290,6 +294,13 @@ SOFTWARE.
 
 ==============================================================================
 
+libc++:
+Copyright (c) 2009-2014 by the contributors listed in CREDITS.TXT
+
+libc++abi:
+Copyright (c) 2009-2014 by the contributors listed in CREDITS.TXT
+
+compiler-rt:
 Copyright (c) 2009-2015 by the contributors listed in CREDITS.TXT
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
