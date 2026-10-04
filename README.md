@@ -6,9 +6,11 @@ Selected music stays on your device. No music is bundled with the application.
 
 ## Try it
 
-1. [Download Visual-SPC-Player.html](https://github.com/Charlie22911/Visual-SPC-Player/releases/latest/download/Visual-SPC-Player.html) and open it in a browser.
+1. [Open Visual SPC Player](https://charlie22911.github.io/Visual-SPC-Player/) in your browser.
 2. [Download SNEStronizer.spc](https://raw.githubusercontent.com/ResistanceVault/demo-twistit/master/data/SNEStronizer.spc).
 3. In the player, choose **Open SPC files** and select the downloaded SPC.
+
+For a portable copy, [download Visual-SPC-Player.html](https://github.com/Charlie22911/Visual-SPC-Player/releases/latest/download/Visual-SPC-Player.html) and open it in your browser.
 
 **SNEStronizer** is music by **AceMan** from **Resistance's TwistIT** SNES / Super Famicom demo. Visit the [TwistIT repository](https://github.com/ResistanceVault/demo-twistit) or [view the SPC on GitHub](https://github.com/ResistanceVault/demo-twistit/blob/master/data/SNEStronizer.spc).
 
@@ -67,7 +69,9 @@ The outputs are `release/v<version>/Visual-SPC-Player.html` and `SHA256SUMS`. Ge
 
 ## Hosted and offline use
 
-Serve `dist/` over HTTPS to use audio and installation on another device. Localhost HTTP works on the same computer; a phone visiting a PC's plain HTTP LAN address does not have the secure context required for AudioWorklet playback.
+The [hosted player](https://charlie22911.github.io/Visual-SPC-Player/) runs on GitHub Pages. Application updates pushed to `main` are published automatically by the **Deploy GitHub Pages** workflow. You can also start a deployment from **Actions → Deploy GitHub Pages → Run workflow**.
+
+To host your own copy, serve `dist/` over HTTPS to use audio and installation on another device. Localhost HTTP works on the same computer; a phone visiting a PC's plain HTTP LAN address does not have the secure context required for AudioWorklet playback.
 
 Use the browser's **Install app** or **Add to Home Screen** action, then keep the app open until Settings reports **Available offline**. Cached application assets are versioned together. Selected music is not added to that cache, so keep your SPC files in local storage. Browser or operating-system cleanup can evict cached files. Settings offers **Update and reload** when a hosted update is ready.
 
