@@ -92,4 +92,10 @@ History retains the latest 10 seconds at the selected capture rate, plus a prede
 - [Source provenance](docs/provenance.md)
 - [Contributing](CONTRIBUTING.md)
 
-Project-owned code is under the MIT license in [LICENSE](LICENSE). The emulator core is LGPL-2.1-or-later; its source and notices are included under `native/vendor/snes_spc`, [LICENSES](LICENSES), and [NOTICE.md](NOTICE.md).
+## Credits and licenses
+
+Audio emulation is provided by **Shay Green (blargg)** through [snes_spc](https://github.com/blarggs-audio-libraries/snes_spc), including its SPC700 CPU, S-DSP, and `blargg_*` support code. The emulator is **LGPL-2.1-or-later**; its original copyright and license notices remain in `native/vendor/snes_spc/`.
+
+The backend and native renderer derive from [Pico-SPC-Player](https://github.com/Charlie22911/Pico-SPC-Player). The interface uses React, React DOM, and Scheduler by Meta Platforms, Inc. and affiliates, plus Vite's generated browser helper. The WebAssembly runtime includes work from the Emscripten authors, Rich Felker and musl contributors, LLVM Project contributors, and Doug Lea.
+
+Project-owned code and the Pico-SPC-Player backend are under the MIT license in [LICENSE](LICENSE). See [NOTICE.md](NOTICE.md) for component credits, upstream acknowledgements, and individual license terms, and [LICENSES](LICENSES) for the retained license texts. Both distribution formats include the credits, licenses, and native build sources.

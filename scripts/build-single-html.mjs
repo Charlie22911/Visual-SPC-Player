@@ -69,12 +69,7 @@ if (/\bimport\s*(?:\(|[`'"{*])/.test(workletSource)) {
 
 const wasm = await readFile(join(distRoot, 'spc_core.wasm'));
 const icon = await readFile(join(distRoot, 'icon.svg'));
-const notices = [
-  await readFile(join(distRoot, 'NOTICE.txt'), 'utf8'),
-  '===== Project license =====\n\n' + await readFile(join(distRoot, 'LICENSE.txt'), 'utf8'),
-  '===== LGPL-2.1 =====\n\n' + await readFile(join(projectRoot, 'LICENSES', 'LGPL-2.1.txt'), 'utf8'),
-  '===== React, React DOM, and Scheduler =====\n\n' + await readFile(join(projectRoot, 'LICENSES', 'React-MIT.txt'), 'utf8'),
-].join('\n\n');
+const notices = await readFile(join(distRoot, 'NOTICE.txt'), 'utf8');
 const sourceBundle = await readFile(join(distRoot, 'spc-core-source.txt'), 'utf8');
 const buildId = createHash('sha256')
   .update(mainJavaScript)

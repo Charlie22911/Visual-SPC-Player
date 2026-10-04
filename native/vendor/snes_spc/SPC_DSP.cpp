@@ -1,4 +1,6 @@
 // snes_spc 0.9.0. http://www.slack.net/~ant/
+// Modifications for Pico-SPC-Player / Visual SPC Player (2026-10-03):
+// copied DSP/voice state and optional DSP memory activity. See README.md.
 
 #include "SPC_DSP.h"
 

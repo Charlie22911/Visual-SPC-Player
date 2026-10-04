@@ -17,7 +17,8 @@ export const copyWasmSources = async (destination) => {
     }
   };
   await copyDirectory('native');
-  for (const path of ['scripts/build-wasm.mjs', 'docs/building.md']) {
+  await copyDirectory('LICENSES');
+  for (const path of ['LICENSE', 'NOTICE.md', 'scripts/build-wasm.mjs', 'docs/building.md', 'docs/provenance.md', 'docs/source-provenance.json']) {
     await mkdir(dirname(join(destination, path)), { recursive: true });
     await copyFile(join(project, path), join(destination, path));
   }

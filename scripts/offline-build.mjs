@@ -3,6 +3,7 @@ import { copyFile, cp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { concatenateWasmSources, copyWasmSources } from './wasm-source-bundle.mjs';
+import { bundledNotices } from './third-party-notices.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -95,7 +96,7 @@ const collectFiles = async (root, directory = root) => {
 
 export const generateOfflineBuild = async (dist = join(projectRoot, 'dist')) => {
   await copyFile(join(projectRoot, 'LICENSE'), join(dist, 'LICENSE.txt'));
-  await copyFile(join(projectRoot, 'NOTICE.md'), join(dist, 'NOTICE.txt'));
+  await writeFile(join(dist, 'NOTICE.txt'), await bundledNotices());
   await cp(join(projectRoot, 'LICENSES'), join(dist, 'LICENSES'), { recursive: true, force: true });
   await copyWasmSources(join(dist, 'source'));
   await writeFile(join(dist, 'spc-core-source.txt'), await concatenateWasmSources(join(dist, 'source')));

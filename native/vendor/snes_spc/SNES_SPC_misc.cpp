@@ -1,4 +1,6 @@
 // SPC emulation support: init, sample buffering, reset, SPC loading
+// Modifications for Pico-SPC-Player / Visual SPC Player (2026-10-03):
+// copied ARAM, heatmap access, and activity initialization. See README.md.
 
 // snes_spc 0.9.0. http://www.slack.net/~ant/
 

@@ -1,4 +1,6 @@
 // SNES SPC-700 APU emulator
+// Modifications for Pico-SPC-Player / Visual SPC Player (2026-10-03):
+// copy-only ARAM and state accessors and activity hooks. See README.md.
 
 // snes_spc 0.9.0
 #ifndef SNES_SPC_H

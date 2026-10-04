@@ -1,4 +1,6 @@
 // snes_spc 0.9.0. http://www.slack.net/~ant/
+// Modifications for Pico-SPC-Player / Visual SPC Player (2026-10-03):
+// optional CPU read/write/execute activity instrumentation. See README.md.
 
 /* Copyright (C) 2004-2007 Shay Green. This module is free software; you
 can redistribute it and/or modify it under the terms of the GNU Lesser

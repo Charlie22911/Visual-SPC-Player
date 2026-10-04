@@ -29,7 +29,7 @@ emcmake cmake -S native -B native/build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build native/build-wasm
 ```
 
-The distribution's native source bundle contains `native/`, `scripts/build-wasm.mjs`, and these instructions. Those files are sufficient to rebuild the core without the browser application sources.
+The distribution's native source bundle contains `native/`, `scripts/build-wasm.mjs`, these instructions, provenance, and the project and component notices. Those files are sufficient to rebuild the core without the browser application sources.
 
 ## Application and core checks
 

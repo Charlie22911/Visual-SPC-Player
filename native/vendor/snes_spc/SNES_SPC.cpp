@@ -1,4 +1,6 @@
 // Core SPC emulation: CPU, timers, SMP registers, memory
+// Modifications for Pico-SPC-Player / Visual SPC Player (2026-10-03):
+// optional CPU read/write activity for copied visual snapshots. See README.md.
 
 // snes_spc 0.9.0. http://www.slack.net/~ant/
 
