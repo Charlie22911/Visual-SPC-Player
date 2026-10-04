@@ -4,6 +4,8 @@ I built Visual SPC Player to play Super Nintendo SPC files and explore the SPC70
 
 Selected music stays on your device. No music is bundled with the application.
 
+> **Photosensitivity warning:** The visualizations can produce flashing lights and rapidly changing, high-contrast patterns that may trigger [photosensitive seizures](https://www.epilepsy.com/what-is-epilepsy/seizure-triggers/photosensitivity). If you are sensitive to these effects, please avoid using the visualizer.
+
 ## Try it
 
 1. [Open Visual SPC Player](https://charlie22911.github.io/Visual-SPC-Player/) in your browser.
