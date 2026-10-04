@@ -32,7 +32,7 @@ describe('ARAM coordinate mapping', () => {
       }
     }
     expect(occupied.every((value) => value === 1)).toBe(true);
-  });
+  }, 30_000); // Exhaustive bit coverage can exceed the default timeout on shared runners.
 
   test('places bit 7 upper-left and bit 0 lower-right in a byte tile', () => {
     expect(bitCoordinates(0, 7)).toEqual({ x: 0, y: 0 });
