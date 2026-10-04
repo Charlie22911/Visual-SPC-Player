@@ -10,7 +10,7 @@ Selected music stays on your device. No music is bundled with the application.
 2. [Download SNEStronizer.spc](https://raw.githubusercontent.com/ResistanceVault/demo-twistit/master/data/SNEStronizer.spc).
 3. In the player, choose **Open SPC files** and select the downloaded SPC.
 
-**SNEStronizer** is music by **AceMan** from **Resistance's TwistIT** SNES / Super Famicom demo. Visit the [TwistIT repository](https://github.com/ResistanceVault/demo-twistit) or [view the SPC on GitHub](https://github.com/ResistanceVault/demo-twistit/blob/master/data/SNEStronizer.spc). The source repository publishes an [MIT license](https://github.com/ResistanceVault/demo-twistit/blob/master/LICENSE.txt).
+**SNEStronizer** is music by **AceMan** from **Resistance's TwistIT** SNES / Super Famicom demo. Visit the [TwistIT repository](https://github.com/ResistanceVault/demo-twistit) or [view the SPC on GitHub](https://github.com/ResistanceVault/demo-twistit/blob/master/data/SNEStronizer.spc).
 
 ## Features
 
