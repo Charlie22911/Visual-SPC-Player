@@ -4,6 +4,14 @@ I built Visual SPC Player to play Super Nintendo SPC files and explore the SPC70
 
 Selected music stays on your device. No music is bundled with the application.
 
+## Try it
+
+1. [Download Visual-SPC-Player.html](https://github.com/Charlie22911/Visual-SPC-Player/releases/latest/download/Visual-SPC-Player.html) and open it in a browser.
+2. [Download SNEStronizer.spc](https://raw.githubusercontent.com/ResistanceVault/demo-twistit/master/data/SNEStronizer.spc).
+3. In the player, choose **Open SPC files** and select the downloaded SPC.
+
+**SNEStronizer** is music by **AceMan** from **Resistance's TwistIT** SNES / Super Famicom demo. Visit the [TwistIT repository](https://github.com/ResistanceVault/demo-twistit) or [view the SPC on GitHub](https://github.com/ResistanceVault/demo-twistit/blob/master/data/SNEStronizer.spc). The source repository publishes an [MIT license](https://github.com/ResistanceVault/demo-twistit/blob/master/LICENSE.txt).
+
 ## Features
 
 - Open individual `.spc` files or browse a searchable folder library.
@@ -16,7 +24,7 @@ Selected music stays on your device. No music is bundled with the application.
 
 ## Portable release
 
-Download `Visual-SPC-Player.html` from the repository's Releases page and open it in a browser. The single file embeds the interface, audio processor, WebAssembly core, notices, and native build sources. It does not need an application server or fetch application assets.
+Download `Visual-SPC-Player.html` from the [latest release](https://github.com/Charlie22911/Visual-SPC-Player/releases/latest) and open it in a browser. The single file embeds the interface, audio processor, WebAssembly core, notices, and native build sources. It does not need an application server or fetch application assets.
 
 Browser restrictions on local-file audio vary. If the file cannot initialize audio, run a source build through a local server instead. See [standalone instructions](docs/standalone.md).
 
