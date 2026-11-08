@@ -10,6 +10,8 @@ field is not active. Scroll to zoom, drag to pan, and hover to inspect.
 ARAM provides Activity, Data and Entropy in Map and Waterfall views, with
 Byte/Bit selection, XOR changes and matching activity backgrounds.
 Settings contains refresh cadence, palettes, persistence and diagnostics.
+The library's border arrow collapses or expands it. The pin button switches
+between floating over the player and reserving space beside it.
 
 Photosensitivity warning: The visualizations can produce flashing lights and
 rapidly changing, high-contrast patterns. If you are sensitive to these effects,

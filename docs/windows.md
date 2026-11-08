@@ -12,8 +12,11 @@ The build targets x64 Windows 10 22H2 and Windows 11 APIs. Windows 11 is the ver
 
 Choose **Open folder** to scan a library or **Open files** to select individual SPC files. You can also drop files onto the window. Music stays on your computer; no music is included in the package.
 
+The library floats over the player by default. Use the arrow tab on its border to collapse or expand it. The pin button reserves space beside the player; unpinning lets it float again. The library's open and pinned states are remembered between runs. Its controls stay visible while you scroll the track list.
+
 - **ARAM:** Activity, Data, and Entropy in Map or Waterfall, with Byte/Bit representations, XOR changes, and matching data underlays.
 - **Navigation:** mouse wheel to zoom, drag to pan, **Fit** for the full address range, and **1:1** for individual logical pixels. Hover to inspect addresses, values, and time intervals.
+- **Layout:** ARAM controls share one row when space permits and wrap in narrower windows. The fixed bottom bar shows inspection and legend information on the left, with playback and rendering information aligned to the right. Hover over shortened footer text to read it in full.
 - **Waterfall:** 2-, 5-, and 10-second windows, with up to ten seconds of retained captures. Time span and data underlays keep the plot height fixed. Unavailable history appears separately from zero-valued data.
 - **Voices / DSP / Track:** copied voice state, DSP registers, and ID666 metadata. Track durations are informational; playback continues until you pause or select another track.
 - **Settings:** palettes, 30 Hz / 60 Hz / Display cadence, activity persistence, compatible settings import/export, and byte-refresh diagnostics.
@@ -23,6 +26,8 @@ Choose **Open folder** to scan a library or **Open files** to select individual 
 Paused drawing slows when idle and responds to input immediately. Minimizing the window stops rendering while playback continues.
 
 Settings are stored in `%LOCALAPPDATA%\VisualSPCPlayer\settings.json`. **Save library** stores folder or file locations in `library.json` in the same directory. Settings exports use the same version 3 format as the browser application and accept earlier version 1 and 2 exports.
+
+Native library layout preferences are stored separately in `layout.json` in that directory.
 
 ## Build
 

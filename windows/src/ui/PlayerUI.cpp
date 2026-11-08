@@ -1,4 +1,5 @@
 #include "PlayerUI.h"
+#include "WorkspaceLayout.h"
 #include "audio/AudioEngine.h"
 #include "model/Library.h"
 #include "model/Settings.h"
@@ -54,6 +55,8 @@ struct PlayerUI::Impl {
     std::array<char, 256> search{};
     bool browserDirty = true, scanning = false, appliedPlaying = false;
     bool mapDirty = true, smoke = false;
+    SidebarState sidebar;
+    FooterText footerText;
     unsigned displayNumerator = 60, displayDenominator = 1, appliedRateNumerator = 0, appliedRateDenominator = 0;
     float appliedVolume = -1;
     uint64_t lastMapId = 0, received = 0, presented = 0, rejected = 0;
@@ -85,6 +88,11 @@ struct PlayerUI::Impl {
         try {
             storage = dataDirectory();
             if (std::filesystem::exists(storage / L"settings.json")) settings = parseSettings(readText(storage / L"settings.json"));
+            try { if (std::filesystem::exists(storage / L"layout.json")) {
+                const auto layout = nlohmann::json::parse(readText(storage / L"layout.json", 4096));
+                sidebar.open = layout.value("libraryOpen", true);
+                sidebar.pinned = layout.value("libraryPinned", false);
+            } } catch (const std::exception&) { sidebar = {}; }
             if (std::filesystem::exists(storage / L"library.json")) {
                 const auto saved = nlohmann::json::parse(readText(storage / L"library.json", 8 * 1024 * 1024));
                 if (saved.value("format", "") == "visual-spc-player-library") {
@@ -272,7 +280,7 @@ struct PlayerUI::Impl {
         browserRows.insert(browserRows.begin(), folders.begin(), folders.end()); browserDirty = false;
     }
     void libraryPanel() {
-        ImGui::TextUnformatted("Library"); ImGui::TextDisabled("%zu SPC files%s", items.size(), scanning ? " · scanning" : "");
+        ImGui::TextDisabled("%zu SPC files%s", items.size(), scanning ? " · scanning" : "");
         if (ImGui::Button("Open folder")) { const auto paths = chooseFiles(window, true); if (!paths.empty()) openFolder(paths.front()); }
         ImGui::SameLine();
         if (ImGui::Button("Open files")) open(chooseFiles(window));
@@ -283,6 +291,7 @@ struct PlayerUI::Impl {
         if (!root.empty()) ImGui::TextWrapped("%s", utf8((root / folder).wstring()).c_str());
         ImGui::Separator();
         if (browserDirty) rebuildBrowser();
+        ImGui::BeginChild("Tracks", ImVec2(0, 0));
         ImGuiListClipper clipper; clipper.Begin(static_cast<int>(browserRows.size()), ImGui::GetTextLineHeightWithSpacing() + 8);
         const auto* current = track();
         while (clipper.Step()) for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index) {
@@ -294,6 +303,7 @@ struct PlayerUI::Impl {
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", utf8(row.path.wstring()).c_str());
             ImGui::PopID();
         }
+        ImGui::EndChild();
     }
     void transport() {
         const auto* current = track();
@@ -320,31 +330,34 @@ struct PlayerUI::Impl {
     }
     void memoryPanel() {
         bool changed = false;
+        FlowToolbar controls;
+        controls.next(FlowToolbar::toggleWidth("Map"));
         if (ImGui::RadioButton("Map", !settings.waterfall)) { settings.waterfall = false; changed = true; }
-        ImGui::SameLine();
+        controls.next(FlowToolbar::toggleWidth("Waterfall"));
         if (ImGui::RadioButton("Waterfall", settings.waterfall)) { settings.waterfall = true; changed = true; }
-        ImGui::SameLine(); ImGui::SetNextItemWidth(120 * ImGui::GetStyle().FontScaleDpi);
+        controls.next(120 * ImGui::GetStyle().FontScaleDpi); ImGui::SetNextItemWidth(120 * ImGui::GetStyle().FontScaleDpi);
         changed |= ImGui::Combo("##measurement", &settings.mode, "Activity\0Data\0Entropy\0");
-        ImGui::SameLine(); bool& bits = settings.selectedBits();
+        controls.next(FlowToolbar::toggleWidth("Byte")); bool& bits = settings.selectedBits();
         if (ImGui::RadioButton("Byte", !bits)) { bits = false; changed = true; }
-        ImGui::SameLine(); if (ImGui::RadioButton("Bit", bits)) { bits = true; changed = true; }
+        controls.next(FlowToolbar::toggleWidth("Bit")); if (ImGui::RadioButton("Bit", bits)) { bits = true; changed = true; }
+        controls.next(FlowToolbar::buttonWidth("-"));
         if (ImGui::Button("-")) { if (settings.waterfall) zoomWaterfall(2); else { mapScale = clampMapScale(mapScale * 0.5f); mapFit = false; } }
-        ImGui::SameLine();
+        controls.next(FlowToolbar::buttonWidth("Fit"));
         if (ImGui::Button("Fit")) { if (settings.waterfall) { waterfallStart = 0; waterfallSpan = 65536; waterfallFit = true; } else mapFit = true; }
-        ImGui::SameLine();
+        controls.next(FlowToolbar::buttonWidth("1:1"));
         if (ImGui::Button("1:1")) { if (settings.waterfall) { waterfallSpan = std::max(1u, lastColumns); waterfallStart = std::min(waterfallStart, 65536 - waterfallSpan); waterfallFit = false; } else { mapScale = 1; mapFit = false; } }
-        ImGui::SameLine();
+        controls.next(FlowToolbar::buttonWidth("+"));
         if (ImGui::Button("+")) { if (settings.waterfall) zoomWaterfall(0.5); else { mapScale = clampMapScale(mapScale * 2); mapFit = false; } }
-        ImGui::SameLine();
         if (settings.waterfall) {
+            controls.next(65 * ImGui::GetStyle().FontScaleDpi);
             ImGui::SetNextItemWidth(65 * ImGui::GetStyle().FontScaleDpi); int duration = settings.seconds == 2 ? 0 : settings.seconds == 5 ? 1 : 2;
             if (ImGui::Combo("##duration", &duration, "2 s\0" "5 s\0" "10 s\0")) { settings.seconds = duration == 0 ? 2 : duration == 1 ? 5 : 10; changed = true; }
         }
-        if (settings.mode == 1) { ImGui::SameLine(); changed |= ImGui::Checkbox("XOR", &settings.xorData); }
-        if (settings.mode == 0) { ImGui::SameLine(); changed |= ImGui::Checkbox("Show data underneath", &settings.underlay); }
+        if (settings.mode == 1) { controls.next(FlowToolbar::toggleWidth("XOR")); changed |= ImGui::Checkbox("XOR", &settings.xorData); }
+        if (settings.mode == 0) { controls.next(FlowToolbar::toggleWidth("Show data underneath")); changed |= ImGui::Checkbox("Show data underneath", &settings.underlay); }
         if (changed) saveSettings();
         const auto available = ImGui::GetContentRegionAvail();
-        const ImVec2 plotSize(std::max(1.0f, available.x), std::max(120.0f, available.y - ImGui::GetTextLineHeightWithSpacing() * 2));
+        const ImVec2 plotSize(std::max(1.0f, available.x), std::max(1.0f, available.y));
         const auto origin = ImGui::GetCursorScreenPos();
         ImGui::InvisibleButton("##plot", plotSize, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
         const bool hovered = ImGui::IsItemHovered(), active = ImGui::IsItemActive();
@@ -461,9 +474,7 @@ struct PlayerUI::Impl {
             }
         }
         clipping.end();
-        ImGui::TextDisabled("%s", inspection.empty() ? "Scroll to zoom · drag to pan · hover to inspect" : inspection.c_str());
-        if (settings.mode == 0) ImGui::TextDisabled("Read (blue) · Write (green) · Execute (amber) · overlaps blend");
-        else ImGui::TextDisabled(settings.mode == 2 ? (settings.entropyBits ? "Entropy: 0–1 bits per bit position · 256-byte blocks" : "Entropy: 0–8 bits per byte · 256-byte blocks") : "Data describes the selected captured state");
+        if (!inspection.empty()) footerText.inspection = std::move(inspection);
     }
     double targetRate() const noexcept { return settings.rate ? settings.rate : static_cast<double>(displayNumerator) / displayDenominator; }
     void voicePanel() {
@@ -563,26 +574,39 @@ struct PlayerUI::Impl {
         const auto start = now100ns();
         auto* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->WorkPos); ImGui::SetNextWindowSize(viewport->WorkSize);
-        ImGui::Begin("Visual SPC Player", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::Begin("Visual SPC Player", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | fixedRegionFlags);
         transport();
-        ImGui::BeginChild("Library", ImVec2(260 * ImGui::GetStyle().FontScaleDpi, 0), ImGuiChildFlags_Borders);
-        try { libraryPanel(); } catch (const std::exception& error) { status = error.what(); }
-        ImGui::EndChild(); ImGui::SameLine();
-        ImGui::BeginChild("Player", ImVec2(0, 0));
-        for (int i = 0; i < 5; ++i) {
-            if (i) ImGui::SameLine();
-            if (ImGui::Selectable(std::array{"ARAM", "Voices", "DSP", "Track", "Settings"}[i], panel == i, 0, ImVec2(70 * ImGui::GetStyle().FontScaleDpi, 0))) panel = i;
+        footerText = {};
+        if (panel == 0) {
+            footerText.inspection = "Scroll to zoom · drag to pan · hover to inspect";
+            footerText.legend = settings.mode == 0 ? "Read (blue) · Write (green) · Execute (amber) · overlaps blend" :
+                settings.mode == 2 ? (settings.entropyBits ? "Entropy: 0–1 bits per bit position · 256-byte blocks" : "Entropy: 0–8 bits per byte · 256-byte blocks") : "Data describes the selected captured state";
         }
-        ImGui::Separator();
-        ImGui::BeginChild("Panel content", ImVec2(0, -ImGui::GetTextLineHeightWithSpacing() * 2));
-        try {
-            if (panel == 0) memoryPanel(); else if (panel == 1) voicePanel();
-            else if (panel == 2) dspPanel(); else if (panel == 3) trackPanel(); else settingsPanel();
-        } catch (const std::exception& error) { status = error.what(); }
-        ImGui::EndChild(); ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.55f, 1, 0.88f, 1), "%s · %.0f draws/s · target %.2f Hz", intent.playing() ? (audio.sampleRate() ? "Live" : "Waiting for audio device") : "Paused", actualFps, targetRate());
-        ImGui::TextDisabled("Render %.2f ms · %.1f s / %.1f MiB history · %zu pending rows", renderMilliseconds, history.retainedSeconds(), history.payloadBytes() / 1048576.0, waterfallRenderer->pendingCount());
-        ImGui::EndChild(); ImGui::End();
+        const bool layoutChanged = drawWorkspace(sidebar, [&] {
+            for (int i = 0; i < 5; ++i) {
+                if (i) ImGui::SameLine();
+                if (ImGui::Selectable(std::array{"ARAM", "Voices", "DSP", "Track", "Settings"}[i], panel == i, 0, ImVec2(70 * ImGui::GetStyle().FontScaleDpi, 0))) panel = i;
+            }
+            ImGui::Separator();
+            ImGui::BeginChild("Panel content", ImVec2(0, 0), 0, panel == 0 ? fixedRegionFlags : 0);
+            try {
+                if (panel == 0) memoryPanel(); else if (panel == 1) voicePanel();
+                else if (panel == 2) dspPanel(); else if (panel == 3) trackPanel(); else settingsPanel();
+            } catch (const std::exception& error) { status = error.what(); }
+            ImGui::EndChild();
+        }, [&] {
+            try { libraryPanel(); } catch (const std::exception& error) { status = error.what(); }
+        }, [&] {
+            char live[180], performance[220];
+            std::snprintf(live, sizeof(live), "%s · %.0f draws/s · target %.2f Hz", intent.playing() ? (audio.sampleRate() ? "Live" : "Waiting for audio device") : "Paused", actualFps, targetRate());
+            std::snprintf(performance, sizeof(performance), "Render %.2f ms · %.1f s / %.1f MiB history · %zu pending rows", renderMilliseconds, history.retainedSeconds(), history.payloadBytes() / 1048576.0, waterfallRenderer->pendingCount());
+            footerText.live = live; footerText.performance = performance;
+            return footerText;
+        });
+        if (layoutChanged && !smoke && !storage.empty())
+            if (!library.save(storage / L"layout.json", nlohmann::json{{"libraryOpen", sidebar.open}, {"libraryPinned", sidebar.pinned}}.dump(2)))
+                status = "The file worker is busy; library layout has not been saved.";
+        ImGui::End();
         ++frameCounter; const auto now = now100ns();
         if (now - fpsAt >= 10000000) { actualFps = frameCounter * 10000000.0 / (now - fpsAt); frameCounter = 0; fpsAt = now; }
         renderMilliseconds = (now - start) / 10000;
