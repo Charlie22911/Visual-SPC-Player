@@ -30,7 +30,7 @@ The native Windows build also includes:
 | Dear ImGui 1.93.0 | Copyright (c) 2014-2026 Omar Cornut | [MIT](windows/vendor/imgui/LICENSE.txt) |
 | nlohmann/json 3.12.0 | Copyright (c) 2013-2025 Niels Lohmann | [MIT](windows/vendor/json/LICENSE.MIT) |
 
-Their `REVISION.txt` files record the pinned source revisions. The Windows package includes the applicable native notices and licenses alongside the executable and replaceable emulator DLL.
+Their `REVISION.txt` files record the pinned source revisions. The Windows executable embeds the applicable native notices and license texts in collapsible About sections. It also includes the complete matching application, emulator, dependency, and build sources as an exportable ZIP, allowing modifications and rebuilding/relinking.
 
 ## Distribution
 

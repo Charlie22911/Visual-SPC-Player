@@ -1,0 +1,22 @@
+Complete source for this executable is included inside it.
+Choose Export source ZIP in About, extract it, and read docs/windows.md.
+You can modify the application or emulator and rebuild/relink the executable.
+
+Build requirements: x64 Microsoft C++ Build Tools, Windows SDK with FXC,
+CMake 3.25+, Ninja, and Python 3.10+. Dependencies are included in the source.
+
+In an x64 Visual Studio developer command prompt:
+  cd windows
+  cmake --preset windows-x64-release
+  cmake --build --preset windows-x64-release
+
+The executable is written to windows/out/x64-release/Visual-SPC-Player.exe.
+The same build embeds its own matching source and license texts.
+No download is needed to view the notices or export the included source.
+
+Project source: https://github.com/Charlie22911/Visual-SPC-Player
+
+The application is MIT licensed; the modified snes_spc core is
+LGPL-2.1-or-later. Modification and reverse engineering for debugging
+modifications are permitted. Keep the complete corresponding source,
+build files, and applicable notices available when redistributing.

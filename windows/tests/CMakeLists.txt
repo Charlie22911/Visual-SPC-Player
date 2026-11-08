@@ -9,7 +9,7 @@ add_executable(spc_audio_source_test audio_source_test.cpp
     ../src/audio/AudioSource.cpp ../src/audio/Resampler.cpp)
 target_include_directories(spc_audio_source_test PRIVATE ../src ../../native/tests)
 target_link_libraries(spc_audio_source_test PRIVATE spc_native_core)
-if(WIN32)
+if(WIN32 AND NOT SPC_DESKTOP_STATIC_CORE)
     add_custom_command(TARGET spc_audio_source_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_FILE:spc_native_core> $<TARGET_FILE_DIR:spc_audio_source_test>)

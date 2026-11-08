@@ -23,9 +23,11 @@ Result render(SidebarState& state, bool waterfall = false, int mode = 0, bool se
     result.regions = workspaceGeometry(p, available, 12 * ImGui::GetStyle().FontScaleDpi + ImGui::GetTextLineHeight() * 2 + ImGui::GetStyle().ItemSpacing.y,
         ImGui::GetStyle().FontScaleDpi, state);
     result.changed = drawWorkspace(state, [&] {
-        for (const auto* label : {"ARAM", "Voices", "DSP", "Track", "Settings"}) {
-            if (label != std::string_view("ARAM")) ImGui::SameLine();
-            ImGui::Selectable(label, false, 0, ImVec2(70 * ImGui::GetStyle().FontScaleDpi, 0));
+        FlowToolbar tabs;
+        for (const auto* label : {"ARAM", "Voices", "DSP", "Track", "Settings", "About"}) {
+            const float width = std::max(70 * ImGui::GetStyle().FontScaleDpi, FlowToolbar::buttonWidth(label));
+            tabs.next(width);
+            ImGui::Selectable(label, false, 0, ImVec2(width, 0));
         }
         ImGui::Separator();
         ImGui::BeginChild("Panel content", ImVec2(0, 0), 0, fixedRegionFlags);

@@ -1,7 +1,7 @@
 Visual SPC Player - Windows x64
 
-Extract the package and run Visual-SPC-Player.exe.
-Keep spc-native-core.dll in the same directory.
+Run Visual-SPC-Player.exe. All application code, usage, license texts and
+complete matching source are included in this single executable.
 
 Open folder scans a local SPC library. Open files selects individual tracks.
 You can also drop files onto the window. Space toggles playback when a text
@@ -26,9 +26,13 @@ Settings: %LOCALAPPDATA%\VisualSPCPlayer\settings.json
 Saved library locations: %LOCALAPPDATA%\VisualSPCPlayer\library.json
 Music stays on your computer. No music is included in this package.
 
-The matching Windows-source ZIP contains the application, modified emulator,
-vendored dependencies and build instructions in docs/windows.md.
+About contains collapsible usage, credits, licenses and source sections.
+Open Source and rebuilding to export the complete matching source ZIP.
+The source includes the application, modified emulator, dependencies,
+and build instructions in docs/windows.md.
 Application source: https://github.com/Charlie22911/Visual-SPC-Player
 
-See LICENSE.txt, THIRD-PARTY-NOTICES.txt and LICENSES/ for terms and credits.
-The LGPL emulator DLL can be rebuilt and replaced using the matching source.
+See the About license and credits sections for terms and attribution.
+The application and LGPL emulator can be modified, rebuilt and relinked
+using the included source. Modification and reverse engineering for debugging
+modifications are permitted.

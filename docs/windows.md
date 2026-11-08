@@ -1,10 +1,10 @@
 # Windows native player
 
-The Windows application uses C++20, Win32, WASAPI shared-mode audio, and Direct3D 11. Release builds use MSVC optimization and interprocedural optimization. The emulator runs in a replaceable `spc-native-core.dll`.
+The Windows application uses C++20, Win32, WASAPI shared-mode audio, and Direct3D 11. Release builds use MSVC optimization and interprocedural optimization. The emulator, interface, shaders, notices, and complete matching source are included in one executable.
 
 ## Run
 
-Extract the Windows ZIP and run `Visual-SPC-Player.exe`. Keep `spc-native-core.dll` beside it.
+Run `Visual-SPC-Player.exe` directly, or extract it from the Windows ZIP. No companion application files are required.
 
 The build targets x64 Windows 10 22H2 and Windows 11 APIs. Windows 11 is the verified runtime platform. A Direct3D 11 feature-level 11_0 adapter provides hardware rendering; WARP provides a software fallback. The application uses the default Windows audio output device. A browser or separately installed application runtime is not required.
 
@@ -20,6 +20,7 @@ The library floats over the player by default. Use the arrow tab on its border t
 - **Waterfall:** 2-, 5-, and 10-second windows, with up to ten seconds of retained captures. Time span and data underlays keep the plot height fixed. Unavailable history appears separately from zero-valued data.
 - **Voices / DSP / Track:** copied voice state, DSP registers, and ID666 metadata. Track durations are informational; playback continues until you pause or select another track.
 - **Settings:** palettes, 30 Hz / 60 Hz / Display cadence, activity persistence, compatible settings import/export, and byte-refresh diagnostics.
+- **About:** collapsible usage, credits, license, and source/build sections. Open **Source and rebuilding → Export source ZIP** to save the complete source included in this executable; no network connection is needed.
 
 **Space** toggles playback when a text field is not active. The interface supports keyboard navigation and Windows DPI scaling. Its controls are custom rendered and do not provide full Windows UI Automation or screen-reader support.
 
@@ -33,7 +34,7 @@ Native library layout preferences are stored separately in `layout.json` in that
 
 ## Build
 
-Install Microsoft's **Desktop development with C++** Build Tools workload, a Windows SDK, and **C++ CMake tools for Windows**. Use CMake 3.25 or newer and Ninja.
+Install Microsoft's **Desktop development with C++** Build Tools workload, a Windows SDK, and **C++ CMake tools for Windows**. Use CMake 3.25 or newer, Ninja, and Python 3.10 or newer.
 
 Open an x64 Visual Studio developer command prompt in the project directory:
 
@@ -45,7 +46,7 @@ ctest --preset windows-x64-release --output-on-failure
 cmake --install out/x64-release --prefix ../release/windows-x64
 ```
 
-The executable and DLL are built under `windows/out/x64-release/`. The `windows-x64-debug` and `windows-x64-release-no-ipo` presets provide development configurations.
+The executable is built under `windows/out/x64-release/`. The `windows-x64-debug` and `windows-x64-release-no-ipo` presets provide development configurations.
 
 ImGui and nlohmann/json sources are vendored at the revisions recorded in their `REVISION.txt` files. The Windows SDK's FXC compiles the shaders during the build. Node.js is needed only to regenerate reference fixtures or work on the browser application.
 
@@ -55,7 +56,7 @@ To create the portable and matching source archives, run this from the project d
 python windows/tools/package.py --build-dir windows/out/x64-release
 ```
 
-The archives and `SHA256SUMS` are written to `release/`. CPack can also package the installed Windows files:
+The executable, archives, and `SHA256SUMS` are written to `release/`. The Windows ZIP contains only the executable; the external source ZIP is identical to the archive embedded in it. CPack can also package the installed Windows files:
 
 ```text
 cpack --config windows/out/x64-release/CPackConfig.cmake -G ZIP
@@ -65,7 +66,7 @@ cpack --config windows/out/x64-release/CPackConfig.cmake -G ZIP
 
 | Location | Purpose |
 | --- | --- |
-| `native/desktop_api.*` | Per-instance emulator DLL interface |
+| `native/desktop_api.*` | Per-instance emulator interface |
 | `native/state_packet.*` | Shared, explicitly encoded snapshot packet |
 | `windows/src/audio/` | WASAPI, resampling, capture scheduling, playback clock |
 | `windows/src/model/` | History, reductions, settings, background file work |
@@ -75,6 +76,6 @@ cpack --config windows/out/x64-release/CPackConfig.cmake -G ZIP
 
 ## Redistribution
 
-The application code is MIT licensed. The modified snes_spc emulator by Shay Green (blargg) is LGPL-2.1-or-later. The DLL can be rebuilt and replaced using the matching source archive and the same C ABI. Retain the applicable notices, license texts, and corresponding modified emulator source when redistributing.
+The application code is MIT licensed. The modified snes_spc emulator by Shay Green (blargg) is LGPL-2.1-or-later. The complete source for the application, modified emulator, dependencies, and build files is embedded in the executable. You can export it, modify the emulator or application, and rebuild/relink the program. Modification and reverse engineering for debugging modifications are permitted. Retain the applicable notices, license texts, and complete corresponding source when redistributing.
 
-See [third-party notices](../NOTICE.md) and the native package's `THIRD-PARTY-NOTICES.txt`.
+The exact native license texts and [third-party notices](../NOTICE.md) are available in **About** and in the exported source.

@@ -49,12 +49,12 @@ std::vector<std::filesystem::path> chooseFiles(HWND owner, bool folder) {
     }
     return paths;
 }
-std::filesystem::path chooseSave(HWND owner, const wchar_t* name) {
+std::filesystem::path chooseSave(HWND owner, const wchar_t* name, bool zip) {
     ComPtr<IFileSaveDialog> dialog;
     if (FAILED(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
         throw std::runtime_error("Save dialog is unavailable");
-    dialog->SetFileName(name); dialog->SetDefaultExtension(L"json");
-    const COMDLG_FILTERSPEC types[] = {{L"JSON", L"*.json"}}; dialog->SetFileTypes(1, types);
+    dialog->SetFileName(name); dialog->SetDefaultExtension(zip ? L"zip" : L"json");
+    const COMDLG_FILTERSPEC types[] = {{zip ? L"ZIP source archive" : L"JSON", zip ? L"*.zip" : L"*.json"}}; dialog->SetFileTypes(1, types);
     if (FAILED(dialog->Show(owner))) return {};
     ComPtr<IShellItem> item; if (FAILED(dialog->GetResult(&item))) return {};
     return itemPath(item.Get());

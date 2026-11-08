@@ -37,6 +37,7 @@ jobs:
         with:
           name: visual-spc-player-windows-x64
           path: |
+            release/Visual-SPC-Player.exe
             release/Visual-SPC-Player-*-windows-*.zip
             release/SHA256SUMS
           if-no-files-found: error

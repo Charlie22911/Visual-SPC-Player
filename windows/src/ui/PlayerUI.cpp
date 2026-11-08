@@ -1,6 +1,7 @@
 #include "PlayerUI.h"
 #include "WorkspaceLayout.h"
 #include "PlayerWidgets.h"
+#include "About.h"
 #include "audio/AudioEngine.h"
 #include "model/Library.h"
 #include "model/Settings.h"
@@ -558,15 +559,25 @@ struct PlayerUI::Impl {
                 settings.mode == 2 ? (settings.entropyBits ? "Entropy: 0–1 bits per bit position · 256-byte blocks" : "Entropy: 0–8 bits per byte · 256-byte blocks") : "Data describes the selected captured state";
         }
         const bool layoutChanged = drawWorkspace(sidebar, [&] {
-            for (int i = 0; i < 5; ++i) {
-                if (i) ImGui::SameLine();
-                if (ImGui::Selectable(std::array{"ARAM", "Voices", "DSP", "Track", "Settings"}[i], panel == i, 0, ImVec2(70 * ImGui::GetStyle().FontScaleDpi, 0))) panel = i;
+            FlowToolbar tabs;
+            for (int i = 0; i < 6; ++i) {
+                const auto label = std::array{"ARAM", "Voices", "DSP", "Track", "Settings", "About"}[i];
+                const float width = std::max(70 * ImGui::GetStyle().FontScaleDpi, FlowToolbar::buttonWidth(label));
+                tabs.next(width);
+                if (ImGui::Selectable(label, panel == i, 0, ImVec2(width, 0))) panel = i;
             }
             ImGui::Separator();
             ImGui::BeginChild("Panel content", ImVec2(0, 0), 0, panel == 0 ? fixedRegionFlags : 0);
             try {
                 if (panel == 0) memoryPanel(); else if (panel == 1) voicePanel();
-                else if (panel == 2) dspPanel(); else if (panel == 3) trackPanel(); else settingsPanel();
+                else if (panel == 2) dspPanel(); else if (panel == 3) trackPanel(); else if (panel == 4) settingsPanel();
+                else if (drawAbout()) {
+                    const auto path = chooseSave(window, L"Visual-SPC-Player-source.zip", true);
+                    if (!path.empty()) {
+                        const auto source = embeddedSource();
+                        status = library.save(path, std::string(source)) ? "" : "Source ZIP could not be saved. Try again.";
+                    }
+                }
             } catch (const std::exception& error) { status = error.what(); }
             ImGui::EndChild();
         }, [&] {

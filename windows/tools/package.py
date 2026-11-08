@@ -1,19 +1,17 @@
 """Package the Windows Release build and its self-contained project source."""
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import zipfile
+from pe_resource import read_resource
 
 ROOT = Path(__file__).resolve().parents[2]
-BINARY_FILES = (
-    "Visual-SPC-Player.exe", "spc-native-core.dll", "README.txt",
-    "THIRD-PARTY-NOTICES.txt", "LICENSE.txt",
-    "LICENSES/LGPL-2.1.txt", "LICENSES/ImGui-MIT.txt", "LICENSES/JSON-MIT.txt",
-)
+BINARY_FILES = ("Visual-SPC-Player.exe",)
 SOURCE_TREES = (".github", "windows", "native", "src", "scripts", "tests", "docs", "public", "LICENSES")
 SOURCE_FILES = (
     "README.md", "LICENSE", "NOTICE.md", "CONTRIBUTING.md", ".gitignore",
@@ -75,15 +73,34 @@ def main():
         raise RuntimeError(f"Unexpected installed files: {actual.symmetric_difference(BINARY_FILES)}")
     binary = output / f"Visual-SPC-Player-{version}-windows-x64.zip"
     source = output / f"Visual-SPC-Player-{version}-windows-source.zip"
-    archive(binary, [(stage / name, name) for name in BINARY_FILES])
     entries = [(path, path.relative_to(ROOT).as_posix()) for path in source_files()]
     required = {"windows/CMakeLists.txt", "native/desktop_api.cpp", "windows/vendor/imgui/imgui.cpp",
                 "windows/vendor/json/json.hpp", "windows/tests/fixtures/metrics.bin",
                 "windows/src/model/PaletteTables.h", "docs/windows.md"}
     if not required.issubset({name for _, name in entries}):
         raise RuntimeError("Source archive is incomplete")
-    archive(source, entries)
-    checksums = "".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in (binary, source))
+    embedded = build / "embedded/Visual-SPC-Player-source.zip"
+    installed = stage / "Visual-SPC-Player.exe"
+    embedded_data = read_resource(installed, 207)
+    if embedded_data != embedded.read_bytes():
+        raise RuntimeError("Rebuild the application: executable source resource differs from the build bundle")
+    text_resources = {201: "windows/resources/README.txt", 202: "windows/resources/THIRD-PARTY-NOTICES.txt",
+                      203: "LICENSE", 204: "LICENSES/LGPL-2.1.txt", 205: "windows/vendor/imgui/LICENSE.txt",
+                      206: "windows/vendor/json/LICENSE.MIT", 208: "windows/resources/BUILDING.txt"}
+    for identifier, name in text_resources.items():
+        if read_resource(installed, identifier) != (ROOT / name).read_bytes():
+            raise RuntimeError(f"Rebuild the application: executable text is stale: {name}")
+    with zipfile.ZipFile(io.BytesIO(embedded_data)) as included:
+        if set(included.namelist()) != {name for _, name in entries}:
+            raise RuntimeError("Rebuild the executable: embedded source file list is stale")
+        for path, name in entries:
+            if included.read(name) != path.read_bytes():
+                raise RuntimeError(f"Rebuild the executable: embedded source is stale: {name}")
+    archive(binary, [(stage / name, name) for name in BINARY_FILES])
+    source.write_bytes(embedded_data)
+    executable = output / "Visual-SPC-Player.exe"
+    executable.write_bytes((stage / "Visual-SPC-Player.exe").read_bytes())
+    checksums = "".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in (executable, binary, source))
     (output / "SHA256SUMS").write_text(checksums, encoding="ascii", newline="\n")
     print(binary)
     print(source)
