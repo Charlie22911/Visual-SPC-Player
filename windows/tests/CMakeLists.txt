@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.20)
+project(VisualSPCModels LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+enable_testing()
+if(NOT TARGET spc_native_core)
+    add_subdirectory(../../native native)
+endif()
+add_executable(spc_audio_source_test audio_source_test.cpp
+    ../src/audio/AudioSource.cpp ../src/audio/Resampler.cpp)
+target_include_directories(spc_audio_source_test PRIVATE ../src ../../native/tests)
+target_link_libraries(spc_audio_source_test PRIVATE spc_native_core)
+if(WIN32)
+    add_custom_command(TARGET spc_audio_source_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:spc_native_core> $<TARGET_FILE_DIR:spc_audio_source_test>)
+endif()
+add_test(NAME spc_audio_source COMMAND spc_audio_source_test)
+add_executable(spc_history_test history_test.cpp ../src/model/History.cpp ../src/model/Metrics.cpp ../src/model/BandJob.cpp)
+target_include_directories(spc_history_test PRIVATE ../src ../../native ../../native/tests)
+target_compile_definitions(spc_history_test PRIVATE
+    SPC_METRICS_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/metrics.bin")
+add_test(NAME spc_history COMMAND spc_history_test)
+add_executable(spc_audio_model_test audio_model_test.cpp ../src/audio/Resampler.cpp)
+target_include_directories(spc_audio_model_test PRIVATE ../src ../../native/tests)
+target_compile_definitions(spc_audio_model_test PRIVATE
+    SPC_RESAMPLER_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/resampler.bin")
+if(MSVC)
+    target_compile_options(spc_audio_model_test PRIVATE /W4 /utf-8 /fp:precise)
+else()
+    target_compile_options(spc_audio_model_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+add_test(NAME spc_audio_model COMMAND spc_audio_model_test)

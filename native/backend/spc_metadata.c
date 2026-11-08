@@ -21,7 +21,9 @@ static bool looks_like_text_date(const uint8_t *source) {
     bool has_text = false;
     for (size_t i = 0u; i < 11u; ++i) {
         const uint8_t character = source[i];
-        if (character == 0u || character == ' ')
+        if (character == 0u)
+            break;
+        if (character == ' ')
             continue;
         if ((character >= '0' && character <= '9') || character == '/' || character == '-') {
             has_text = true;
@@ -51,22 +53,20 @@ static void copy_field(char *destination, size_t capacity, const uint8_t *source
 }
 
 static bool parse_decimal(const uint8_t *source, size_t length, uint32_t *value) {
+    size_t end = 0u;
+    while (end < length && source[end] != 0u) ++end;
+    while (end != 0u && source[end - 1u] == ' ') --end;
+    size_t start = 0u;
+    while (start < end && source[start] == ' ') ++start;
+    if (start == end) return false;
     uint32_t result = 0u;
-    bool found_digit = false;
-    for (size_t i = 0u; i < length; ++i) {
+    for (size_t i = start; i < end; ++i) {
         const uint8_t character = source[i];
-        if (character == 0u || character == ' ')
-            continue;
-        if (character < '0' || character > '9')
-            return false;
-        found_digit = true;
+        if (character < '0' || character > '9') return false;
         const uint32_t digit = (uint32_t)(character - '0');
-        if (result > (UINT32_MAX - digit) / 10u)
-            return false;
+        if (result > (UINT32_MAX - digit) / 10u) return false;
         result = result * 10u + digit;
     }
-    if (!found_digit)
-        return false;
     *value = result;
     return true;
 }
@@ -84,7 +84,8 @@ bool spc_metadata_parse(const uint8_t *data, size_t size, spc_metadata_t *metada
         return false;
     *metadata = (spc_metadata_t){0};
     if (data == NULL || size < SPC_HEADER_SIZE ||
-        memcmp(data, spc_signature, sizeof(spc_signature) - 1u) != 0) {
+        memcmp(data, spc_signature, sizeof(spc_signature) - 1u) != 0 ||
+        data[0x21] != 0x1au || data[0x22] != 0x1au || data[0x24] != 0x1eu) {
         return false;
     }
     if (data[SPC_HAS_ID666_OFFSET] != 0x1au)
@@ -99,8 +100,9 @@ bool spc_metadata_parse(const uint8_t *data, size_t size, spc_metadata_t *metada
     uint32_t seconds = 0u;
     uint32_t fade = 0u;
     const bool text_layout = looks_like_text_date(data + SPC_DATE_OFFSET);
-    const bool text_timing = parse_decimal(data + SPC_TEXT_SECONDS_OFFSET, 3u, &seconds) &&
-                             parse_decimal(data + SPC_TEXT_FADE_OFFSET, 5u, &fade);
+    const bool seconds_valid = parse_decimal(data + SPC_TEXT_SECONDS_OFFSET, 3u, &seconds);
+    const bool fade_valid = parse_decimal(data + SPC_TEXT_FADE_OFFSET, 5u, &fade);
+    const bool text_timing = seconds_valid && fade_valid;
     metadata->binary_id666 = !text_layout && !text_timing;
     if (metadata->binary_id666) {
         seconds = read_little_endian(data + SPC_TEXT_SECONDS_OFFSET, 3u);

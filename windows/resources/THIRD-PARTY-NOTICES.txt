@@ -1,0 +1,30 @@
+Visual SPC Player
+
+Project-owned code: MIT License, Copyright (c) 2026 Visual SPC Player
+contributors and Copyright (c) 2026 Pico-SPC-Player contributors.
+The backend derives from https://github.com/Charlie22911/Pico-SPC-Player.
+See LICENSE.txt.
+
+snes_spc 0.9.0 by Shay Green (blargg)
+Copyright (C) 2004-2007 Shay Green (SPC700 core)
+Copyright (C) 2007 Shay Green (S-DSP implementation)
+License: GNU Lesser General Public License, version 2.1 or later.
+Base revision: ec8ee2bbe30451614c1d02a83f7af1c97d497d45
+Source: https://github.com/blarggs-audio-libraries/snes_spc
+The local source includes copied ARAM/DSP/voice state and memory-activity hooks
+for Pico-SPC-Player and Visual SPC Player. Original notices remain in the source.
+The matching source archive includes the modified core and build files.
+spc-native-core.dll uses a replaceable C ABI.
+See LICENSES/LGPL-2.1.txt and the retained snes_spc source notices.
+
+Dear ImGui v1.93.0
+Copyright (c) 2014-2026 Omar Cornut
+License: MIT. See LICENSES/ImGui-MIT.txt.
+Source: https://github.com/ocornut/imgui
+Revision: c1aaac65e896a45f81f47a4d68f9959e0f86c859
+
+nlohmann/json v3.12.0
+Copyright (c) 2013-2025 Niels Lohmann
+License: MIT. See LICENSES/JSON-MIT.txt.
+Source: https://github.com/nlohmann/json
+Revision: 55f93686c01528224f448c19128836e7df245f72

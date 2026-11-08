@@ -35,7 +35,11 @@
     {
       "name": "React, React DOM, and Scheduler",
       "source": "https://github.com/react/react",
-      "versions": { "react": "19.3.0", "react-dom": "19.3.0", "scheduler": "0.28.0" },
+      "versions": {
+        "react": "19.3.0",
+        "react-dom": "19.3.0",
+        "scheduler": "0.28.0"
+      },
       "copyright": "Copyright (c) Meta Platforms, Inc. and affiliates.",
       "license": "MIT",
       "licensePath": "LICENSES/React-MIT.txt",
@@ -86,6 +90,32 @@
       "license": "CC0-1.0; MIT OR NCSA for Emscripten modifications",
       "attributionPath": "LICENSES/dlmalloc-NOTICE.txt",
       "use": "WebAssembly memory allocator."
+    },
+    {
+      "name": "Dear ImGui",
+      "version": "1.93.0",
+      "source": "https://github.com/ocornut/imgui",
+      "baseRevision": "c1aaac65e896a45f81f47a4d68f9959e0f86c859",
+      "copyright": "Copyright (c) 2014-2026 Omar Cornut",
+      "license": "MIT",
+      "localPaths": [
+        "windows/vendor/imgui"
+      ],
+      "licensePath": "windows/vendor/imgui/LICENSE.txt",
+      "localModifications": "Selected core files and official Win32/Direct3D11 backends, unmodified."
+    },
+    {
+      "name": "nlohmann/json",
+      "version": "3.12.0",
+      "source": "https://github.com/nlohmann/json",
+      "baseRevision": "55f93686c01528224f448c19128836e7df245f72",
+      "copyright": "Copyright (c) 2013-2025 Niels Lohmann",
+      "license": "MIT",
+      "localPaths": [
+        "windows/vendor/json"
+      ],
+      "licensePath": "windows/vendor/json/LICENSE.MIT",
+      "localModifications": "Unmodified single-header distribution."
     }
   ]
 }

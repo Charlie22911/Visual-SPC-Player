@@ -18,6 +18,12 @@ typedef struct {
     uint32_t fade_milliseconds;
 } spc_metadata_t;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 bool spc_metadata_parse(const uint8_t *data, size_t size, spc_metadata_t *metadata);
+#ifdef __cplusplus
+}
+#endif
 
 #endif

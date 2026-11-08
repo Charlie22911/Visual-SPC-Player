@@ -21,6 +21,17 @@ The emulator is **LGPL-2.1-or-later**, separately from the application's MIT lic
 
 Versions and source origins are recorded in [docs/source-provenance.json](docs/source-provenance.json) and `pnpm-lock.yaml`. The runtime notices correspond to Emscripten 3.1.6; builds using another toolchain should retain its applicable notices.
 
+## Windows native components
+
+The native Windows build also includes:
+
+| Component | Credit | Retained terms |
+| --- | --- | --- |
+| Dear ImGui 1.93.0 | Copyright (c) 2014-2026 Omar Cornut | [MIT](windows/vendor/imgui/LICENSE.txt) |
+| nlohmann/json 3.12.0 | Copyright (c) 2013-2025 Niels Lohmann | [MIT](windows/vendor/json/LICENSE.MIT) |
+
+Their `REVISION.txt` files record the pinned source revisions. The Windows package includes the applicable native notices and licenses alongside the executable and replaceable emulator DLL.
+
 ## Distribution
 
 The static site and standalone HTML include these notices, retained license texts, and native sources with build instructions. Settings provides links to the notices and source bundle. Retain the applicable notices and corresponding source when redistributing, including the LGPL source and relinking requirements for snes_spc.

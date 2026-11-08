@@ -1,6 +1,6 @@
 # Visual SPC Player
 
-I built Visual SPC Player to play Super Nintendo SPC files and explore the SPC700 / S-DSP sound system through live memory and access visualizations. The audio core runs locally in WebAssembly, with an interface designed for desktop and phone screens.
+I built Visual SPC Player to play Super Nintendo SPC files and explore the SPC700 / S-DSP sound system through live memory and access visualizations. The browser version runs locally in WebAssembly, with an interface designed for desktop and phone screens. The native Windows version uses C++ and GPU rendering.
 
 Selected music stays on your device. No music is bundled with the application.
 
@@ -14,12 +14,14 @@ Selected music stays on your device. No music is bundled with the application.
 
 For a portable copy, [download Visual-SPC-Player.html](https://github.com/Charlie22911/Visual-SPC-Player/releases/latest/download/Visual-SPC-Player.html) and open it in your browser.
 
+For the native Windows application and build instructions, see the [Windows guide](docs/windows.md).
+
 **SNEStronizer** is music by **AceMan** from **Resistance's TwistIT** SNES / Super Famicom demo. Visit the [TwistIT repository](https://github.com/ResistanceVault/demo-twistit) or [view the SPC on GitHub](https://github.com/ResistanceVault/demo-twistit/blob/master/data/SNEStronizer.spc).
 
 ## Features
 
 - Open individual `.spc` files or browse a searchable folder library.
-- Play through an AudioWorklet with sample-rate conversion.
+- Play through an AudioWorklet in the browser or WASAPI on Windows, with sample-rate conversion.
 - Inspect all 64 KiB of ARAM as Activity, Data, or Entropy.
 - Switch between a 2D Map and a scrolling Waterfall, with zoom down to individual bytes or bits.
 - Choose Byte or Bit representations, show matching data beneath Activity, and use XOR to highlight captured changes.
@@ -64,6 +66,7 @@ The outputs are `release/v<version>/Visual-SPC-Player.html` and `SHA256SUMS`. Ge
 | `native/backend/` | Reusable SPC backend and copied state |
 | `native/vendor/snes_spc/` | Emulator source and its original notices |
 | `native/tools/`, `native/tests/` | Native WAV renderer and test harnesses |
+| `windows/` | Native Windows application, GPU renderers, vendored dependencies, and packaging |
 | `public/` | Icons and install metadata |
 | `scripts/` | Build, release packaging, local server, and browser checks |
 | `tests/` | Application and renderer tests with generated fixtures |

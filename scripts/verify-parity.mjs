@@ -9,7 +9,7 @@ const project = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const temporary = await mkdtemp(join(tmpdir(), 'spc-parity-'));
 const input = join(temporary, 'fixture.spc');
 const output = join(temporary, 'native.wav');
-const image = new Uint8Array(0x10180);
+let image = new Uint8Array(0x10180);
 image.set(new TextEncoder().encode('SNES-SPC700 Sound File Data v0.30'));
 image.set([0x1a, 0x1a, 0x1a, 0x1e], 0x21);
 for (let address = 0; address < 65536; address += 1) image[0x100 + address] = (address ^ (address >> 8)) & 0xff;
@@ -18,13 +18,17 @@ image[0x25] = 0;
 image[0x26] = 2;
 image[0x100 + 0x200] = 0x2f;
 image[0x100 + 0x201] = 0xfe;
+if (process.env.SPC_PARITY_INPUT) image = new Uint8Array(await readFile(resolve(process.env.SPC_PARITY_INPUT)));
 await writeFile(input, image);
 
 const run = (command, args) => {
   const result = spawnSync(command, args, { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || 'Native parity renderer failed');
 };
-if (process.platform === 'win32') {
+const renderer = process.env.SPC_NATIVE_RENDERER;
+if (renderer) {
+  run(resolve(renderer), [input, output, '1']);
+} else if (process.platform === 'win32') {
   const wslPath = (path) => spawnSync('wsl.exe', ['-e', 'wslpath', '-a', path], { encoding: 'utf8' }).stdout.trim();
   run('wsl.exe', ['-e', wslPath(join(project, 'native', 'build-release', 'spc_web_render')), wslPath(input), wslPath(output), '1']);
 } else {

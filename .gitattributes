@@ -2,6 +2,9 @@
 *.png binary
 *.wasm binary
 *.zip binary
+*.ico binary
+*.bin binary
 # Retain imported source and license formatting.
 native/vendor/snes_spc/** -whitespace
+windows/vendor/** -whitespace
 LICENSES/** -whitespace

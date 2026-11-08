@@ -4,7 +4,7 @@ I welcome focused fixes and improvements to Visual SPC Player. Before starting a
 
 ## Development
 
-Follow [docs/building.md](docs/building.md) to install the toolchains and build the application. Keep audio emulation in the worklet and native core; present copied snapshots on the main thread.
+Follow [docs/building.md](docs/building.md) for the browser build or [docs/windows.md](docs/windows.md) for the native Windows build. Keep emulation on the browser worklet or Windows audio thread, and present copied snapshots to the interface.
 
 Run `pnpm test` and `pnpm typecheck` for application changes. Rebuild and run the native, WebAssembly, and protocol checks when changing the audio core or its ABI. For interface and renderer changes, run the relevant browser checks at desktop and phone sizes.
 

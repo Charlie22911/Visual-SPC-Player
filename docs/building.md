@@ -1,5 +1,7 @@
 # Building and testing
 
+For the native Windows application, use the [Windows build guide](windows.md). The instructions below cover the browser application and WebAssembly core.
+
 ## Prerequisites
 
 - Node.js 24 or newer

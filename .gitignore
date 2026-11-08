@@ -12,6 +12,9 @@ artifacts/
 .codex/
 .aws/
 native/build*/
+windows/out/
+__pycache__/
+*.pyc
 public/spc_core.wasm
 public/spc_core.js
 /Visual-SPC-Player.html
