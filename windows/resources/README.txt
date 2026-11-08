@@ -6,6 +6,7 @@ Keep spc-native-core.dll in the same directory.
 Open folder scans a local SPC library. Open files selects individual tracks.
 You can also drop files onto the window. Space toggles playback when a text
 field is not active. Scroll to zoom, drag to pan, and hover to inspect.
+Hover over the Play/Pause and Restart symbols to see their labels.
 
 ARAM provides Activity, Data and Entropy in Map and Waterfall views, with
 Byte/Bit selection, XOR changes and matching activity backgrounds.

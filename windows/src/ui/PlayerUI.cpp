@@ -1,5 +1,6 @@
 #include "PlayerUI.h"
 #include "WorkspaceLayout.h"
+#include "PlayerWidgets.h"
 #include "audio/AudioEngine.h"
 #include "model/Library.h"
 #include "model/Settings.h"
@@ -307,20 +308,13 @@ struct PlayerUI::Impl {
     }
     void transport() {
         const auto* current = track();
-        ImGui::TextColored(ImVec4(0.55f, 1, 0.88f, 1), "Visual SPC Player");
-        ImGui::SameLine(220 * ImGui::GetStyle().FontScaleDpi);
         const auto title = current ? (current->metadata.title[0] ? std::string(current->metadata.title) : utf8(current->path.stem().wstring())) : "Open an SPC file to begin";
-        ImGui::TextUnformatted(title.c_str());
-        ImGui::SameLine(); ImGui::TextDisabled("%s", current ? current->metadata.game : "");
         const auto seconds = static_cast<unsigned>(std::max(0.0, mediaFrame) / 32000);
-        ImGui::Text("%02u:%02u", seconds / 60, seconds % 60); ImGui::SameLine();
-        if (ImGui::Button(intent.playing() ? "Pause" : "Play")) intent.setPlaying(!intent.playing());
-        ImGui::SameLine();
-        if (ImGui::Button("Restart") && current) load(current->path, false);
-        ImGui::SameLine(); ImGui::SetNextItemWidth(180 * ImGui::GetStyle().FontScaleDpi);
-        if (ImGui::SliderFloat("Volume", &settings.volume, 0, 1, "%.2f")) saveSettings();
-        if (!status.empty()) { ImGui::SameLine(); ImGui::TextDisabled("%s", status.c_str()); }
-        ImGui::Separator();
+        const auto actions = drawTransport(title, current ? current->metadata.game : "", status,
+            seconds, intent.playing(), current != nullptr, settings.volume);
+        if (actions.playPause) intent.setPlaying(!intent.playing());
+        if (actions.restart && current) load(current->path, false);
+        if (actions.volumeChanged) saveSettings();
     }
     void zoomWaterfall(double factor, double anchorFraction = 0.5) {
         const double address = waterfallStart + waterfallSpan * anchorFraction;
@@ -478,28 +472,9 @@ struct PlayerUI::Impl {
     }
     double targetRate() const noexcept { return settings.rate ? settings.rate : static_cast<double>(displayNumerator) / displayDenominator; }
     void voicePanel() {
-        const auto* snapshot = history.selected(); if (!snapshot) { ImGui::TextUnformatted("Open an SPC file."); return; }
-        if (ImGui::BeginTable("Voices", 13, ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollX | ImGuiTableFlags_RowBg)) {
-            for (const char* name : {"Voice", "L", "R", "Pitch", "BRR", "Source", "Envelope", "ADSR", "Gain", "ENVX", "OUTX", "Mode", "KON/KOFF/ENDX"}) ImGui::TableSetupColumn(name);
-            ImGui::TableHeadersRow();
-            for (unsigned voice = 0; voice < 8; ++voice) {
-                const auto* v = snapshot->state.data() + 160 + voice * 16;
-                ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::Text("%u", voice + 1);
-                ImGui::TableNextColumn(); ImGui::Text("%d", static_cast<int8_t>(v[0]));
-                ImGui::TableNextColumn(); ImGui::Text("%d", static_cast<int8_t>(v[1]));
-                ImGui::TableNextColumn(); ImGui::Text("$%04X", u16(v + 2));
-                ImGui::TableNextColumn(); ImGui::Text("$%04X", u16(v + 6));
-                ImGui::TableNextColumn(); ImGui::Text("$%02X", v[8]);
-                ImGui::TableNextColumn(); ImGui::ProgressBar(u16(v + 4) / 2047.0f, ImVec2(100 * ImGui::GetStyle().FontScaleDpi, 0));
-                ImGui::TableNextColumn(); ImGui::Text("$%02X %02X", v[9], v[10]);
-                ImGui::TableNextColumn(); ImGui::Text("$%02X", v[11]);
-                ImGui::TableNextColumn(); ImGui::Text("%u", v[12]);
-                ImGui::TableNextColumn(); ImGui::Text("%d", static_cast<int8_t>(v[13]));
-                ImGui::TableNextColumn(); ImGui::Text("%s", v[14] < 4 ? std::array{"Release", "Attack", "Decay", "Sustain"}[v[14]] : "?");
-                ImGui::TableNextColumn(); ImGui::Text("%u / %u / %u", v[15] & 1, (v[15] >> 1) & 1, (v[15] >> 2) & 1);
-            }
-            ImGui::EndTable();
-        }
+        const auto* snapshot = history.selected();
+        if (!snapshot) { ImGui::TextUnformatted("Open an SPC file."); return; }
+        drawVoiceTable(std::span<const uint8_t, 128>(snapshot->state.data() + 160, 128));
     }
     void dspPanel() {
         const auto* snapshot = history.selected(); if (!snapshot) return;

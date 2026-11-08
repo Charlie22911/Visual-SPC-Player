@@ -23,6 +23,8 @@ The library floats over the player by default. Use the arrow tab on its border t
 
 **Space** toggles playback when a text field is not active. The interface supports keyboard navigation and Windows DPI scaling. Its controls are custom rendered and do not provide full Windows UI Automation or screen-reader support.
 
+The playback buttons use Play/Pause and Restart symbols with hover labels. Control symbols scale with the current font size. Voice table columns have fixed widths based on their value ranges and the active font, with extra room around the text. Narrow windows scroll the table horizontally instead of squeezing the cells.
+
 Paused drawing slows when idle and responds to input immediately. Minimizing the window stops rendering while playback continues.
 
 Settings are stored in `%LOCALAPPDATA%\VisualSPCPlayer\settings.json`. **Save library** stores folder or file locations in `library.json` in the same directory. Settings exports use the same version 3 format as the browser application and accept earlier version 1 and 2 exports.

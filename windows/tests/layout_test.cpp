@@ -1,4 +1,5 @@
 #include "ui/WorkspaceLayout.h"
+#include "ui/PlayerWidgets.h"
 #include "imgui_internal.h"
 #include "test_check.h"
 #include <algorithm>
@@ -16,8 +17,8 @@ Result render(SidebarState& state, bool waterfall = false, int mode = 0, bool se
     ImGui::NewFrame();
     ImGui::SetNextWindowPos(ImVec2(0, 0)); ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
     ImGui::Begin("Layout", nullptr, ImGuiWindowFlags_NoDecoration | fixedRegionFlags);
-    ImGui::TextUnformatted("Visual SPC Player / Track");
-    ImGui::Button("Pause"); ImGui::SameLine(); ImGui::Button("Restart"); ImGui::Separator();
+    float volume = 0.8f;
+    drawTransport("A long track title that can be clipped safely", "Game", "", 23, true, true, volume);
     const auto p = ImGui::GetCursorScreenPos(); const auto available = ImGui::GetContentRegionAvail();
     result.regions = workspaceGeometry(p, available, 12 * ImGui::GetStyle().FontScaleDpi + ImGui::GetTextLineHeight() * 2 + ImGui::GetStyle().ItemSpacing.y,
         ImGui::GetStyle().FontScaleDpi, state);
@@ -83,7 +84,7 @@ int main() {
     CHECK(io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 16));
     unsigned char* pixels; int width, height;
     io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-    for (const float dpi : {1.0f, 1.5f, 2.0f}) {
+    for (const float dpi : {1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.5f, 3.0f}) {
         ImGui::GetStyle() = ImGuiStyle();
         auto& style = ImGui::GetStyle(); style.FramePadding = ImVec2(9, 6); style.ItemSpacing = ImVec2(9, 8);
         style.ScaleAllSizes(dpi); style.FontScaleDpi = dpi;
