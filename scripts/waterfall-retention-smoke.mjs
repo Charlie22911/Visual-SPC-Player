@@ -52,11 +52,15 @@ try {
       const live = await page.evaluate(() => {
         const { history, renderer, stream } = window.retentionRuntime();
         const records = [...history.records()];
+        const bottom = renderer.inspect(0, renderer.config.height - 1);
         return { seconds: (history.latest().audibleFrame - records[0].audibleFrame) / 32000,
-          bottomValid: renderer.inspect(0, renderer.config.height - 1).row.valid,
+          bottomValid: bottom.row.valid,
+          expectedBottomValid: records.some(record => record.intervalStartFrame !== null && record.intervalStartFrame < bottom.endFrame && record.audibleFrame > bottom.startFrame),
           records: history.count, payloadBytes: history.payloadBytes, overflows: stream.queueOverflows };
       });
-      assert(live.seconds >= 10); assert(live.bottomValid); assert.equal(live.overflows, 0);
+      assert(live.seconds >= 10);
+      assert.equal(live.bottomValid, live.expectedBottomValid, 'Live capture gaps must stay distinguishable from retained measurements');
+      assert.equal(live.overflows, 0);
       assert(live.payloadBytes <= (live.records + 2) * (90400 + 24576));
       console.log('Live playback retained the full window', live);
     }

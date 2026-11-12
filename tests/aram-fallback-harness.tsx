@@ -28,8 +28,10 @@ export async function fallbackPixels(failure: 'shader' | 'link') {
     const stream = new VisualStream(), snapshot = makeSnapshot(1, { frame: 0, ram: ram => ram.fill(255) });
     history.accept(snapshot, 0); stream.publish(snapshot);
     flushSync(() => root.render(createElement(MapView, { active: true, memoryHistory: history, onStats: () => {}, mode: 'bytes', snapshot, stream, generation: 1, palette: 'grayscale', activityByteBackground: false, activityPersistence: false, activityPersistenceMilliseconds: 100, refreshRate: 60, displayHz: 60 })));
-    // A remount is a React update scheduled by the failed initialization effect.
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    // Wait for the fallback paint after the failed initialization remounts it.
+    for (let frame = 0; frame < 60 && host.querySelector('canvas')?.dataset.renderer !== 'canvas2d'; frame++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    }
     const canvas = host.querySelector('canvas')!;
     const context = canvas.getContext('2d');
     const map = { fresh: !claimed.has(canvas), pixel: context ? [...context.getImageData(0, 0, 1, 1).data] : null };
