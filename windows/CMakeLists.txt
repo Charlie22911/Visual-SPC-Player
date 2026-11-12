@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
-project(VisualSPCPlayer VERSION 0.2.0 LANGUAGES C CXX RC)
+project(VisualSPCPlayer VERSION 0.2.1 LANGUAGES C CXX RC)
 if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "Use the x64 MSVC Windows toolchain for the desktop build")
 endif()

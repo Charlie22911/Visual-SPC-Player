@@ -56,7 +56,7 @@ await setLibraryOpen(page, true);
 await page.locator('.track-list button').first().click();
 await setLibraryOpen(page, false);
 await page.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ state: 'attached', timeout: 15_000 });
-await page.locator('.transport time').filter({ hasText: '00:01' }).waitFor({ timeout: 10_000 });
+await page.locator('.transport time').filter({ hasText: /^(?!00:00$)\d+:\d{2}$/ }).waitFor({ timeout: 10_000 });
 await page.locator('input[accept=".spc"]').setInputFiles([slowA, fastB]);
 await setLibraryOpen(page, true);
 const choices = page.locator('.track-list button');
@@ -99,8 +99,14 @@ await page.getByRole('button', { name: 'Settings', exact: true }).click();
 await page.locator('.setting-row select').selectOption('grayscale');
 await page.getByRole('button', { name: 'ARAM', exact: true }).click();
 await selectMemoryView(page, 'xor');
+await page.waitForFunction(() => {
+  const history = window.memoryRuntime().history, record = history.latest();
+  return record && history.previous(record);
+});
 let sawChange = false;
-for (let i = 0; i < 12; i++) {
+let xorChecks = 0;
+const xorDeadline = Date.now() + 30000;
+while (xorChecks < 12 && Date.now() < xorDeadline) {
   const reading = await canvas.evaluate(c => {
     let fiber = c[Object.keys(c).find(k => k.startsWith('__reactFiber$'))];
     let history;
@@ -109,13 +115,19 @@ for (let i = 0; i < 12; i++) {
       if (value?.accept && typeof value.payloadBytes === 'number') history = value;
     }
     const record = history.latest(), previous = history.previous(record);
+    // Software graphics readback can stall presentation and create a real gap.
+    // Only continuous intervals have a valid XOR baseline.
+    if (!previous) return null;
     const mask = record.payload[0x1234] ^ previous.payload[0x1234];
     return { mask, pixels: window.readMemoryCanvas(c, { x: 0x34, y: 0x12 }) };
   });
+  if (!reading) { await page.waitForTimeout(30); continue; }
   const expected = reading.mask;
   assert.deepEqual(reading.pixels, [expected, expected, expected, 255]);
+  xorChecks += 1;
   sawChange ||= reading.mask > 0; await page.waitForTimeout(30);
 }
+assert.equal(xorChecks, 12, 'XOR checks require continuous retained intervals');
 assert(sawChange, 'XOR pixels must match real retained byte changes');
 await selectMemoryView(page, 'entropy');
 assert.deepEqual(await canvas.evaluate(readMemoryCanvas, { x: 0, y: 0x80 }), [255, 255, 255, 255]);
@@ -155,7 +167,7 @@ await setLibraryOpen(page, true);
 await page.locator('.track-list button').first().click();
 await setLibraryOpen(page, false);
 await page.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ state: 'attached', timeout: 15_000 });
-await page.locator('.transport time').filter({ hasText: '00:01' }).waitFor({ timeout: 10_000 });
+await page.locator('.transport time').filter({ hasText: /^(?!00:00$)\d+:\d{2}$/ }).waitFor({ timeout: 10_000 });
 
 const fresh = await browser.newContext({ viewport: { width: 390, height: 844 } });
 let freshPage = await fresh.newPage();
@@ -174,7 +186,7 @@ await setLibraryOpen(freshPage, true);
 await freshPage.locator('.track-list button').first().click();
 await setLibraryOpen(freshPage, false);
 await freshPage.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ state: 'attached', timeout: 15_000 });
-await freshPage.locator('.transport time').filter({ hasText: '00:01' }).waitFor({ timeout: 10_000 });
+await freshPage.locator('.transport time').filter({ hasText: /^(?!00:00$)\d+:\d{2}$/ }).waitFor({ timeout: 10_000 });
 await fresh.close();
 
 assert.deepEqual(failures, []);
