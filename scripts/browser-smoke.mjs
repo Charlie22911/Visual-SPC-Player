@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { createRequire } from 'node:module';
 import { artifactPath, browserLaunchOptions } from './browser-environment.mjs';
-import { selectMemoryView } from './browser-view-helpers.mjs';
+import { selectMemoryView, setLibraryOpen, installMemoryTools, readMemoryCanvas } from './browser-view-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -44,44 +44,56 @@ const watch = (target) => {
 watch(page);
 
 await page.goto(url, { waitUntil: 'networkidle' });
+await installMemoryTools(page);
+await setLibraryOpen(page, false);
 assert.equal((await context.request.get(new URL('missing.js', url).href)).status(), 404);
 assert.equal((await context.request.get(new URL('%E0%A4%A', url).href)).status(), 400);
 await page.getByRole('button', { name: 'Settings' }).click();
 await page.getByText('Available offline', { exact: true }).waitFor({ timeout: 20_000 });
 await page.getByRole('button', { name: 'ARAM' }).click();
 await page.locator('input[accept=".spc"]').setInputFiles(upload);
+await setLibraryOpen(page, true);
 await page.locator('.track-list button').first().click();
-await page.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ timeout: 15_000 });
+await setLibraryOpen(page, false);
+await page.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ state: 'attached', timeout: 15_000 });
 await page.locator('.transport time').filter({ hasText: '00:01' }).waitFor({ timeout: 10_000 });
 await page.locator('input[accept=".spc"]').setInputFiles([slowA, fastB]);
+await setLibraryOpen(page, true);
 const choices = page.locator('.track-list button');
 await choices.filter({ hasText: 'slow-a' }).click();
 await choices.filter({ hasText: 'fast-b' }).click();
+await setLibraryOpen(page, false);
 await page.locator('.now-playing strong').filter({ hasText: 'Newest fast track' }).waitFor({ timeout: 10_000 });
 await page.waitForTimeout(700);
 assert.equal(await page.locator('.now-playing strong').textContent(), 'Newest fast track');
 
 const canvas = page.locator('.map-stage canvas');
-assert.equal(await canvas.getAttribute('width'), '256');
+const checkMapSize = async (logicalWidth, logicalHeight) => {
+  const size = await canvas.evaluate(c => ({ width: c.width, height: c.height, viewport: c.style.transform === 'none', expectedWidth: Math.round(c.parentElement.clientWidth * devicePixelRatio), expectedHeight: Math.round(c.parentElement.clientHeight * devicePixelRatio) }));
+  assert.deepEqual([size.width, size.height], size.viewport ? [size.expectedWidth, size.expectedHeight] : [logicalWidth, logicalHeight]);
+};
+await checkMapSize(256, 256);
 await selectMemoryView(page, 'bits');
-assert.equal(await canvas.getAttribute('width'), '1024');
+await checkMapSize(1024, 512);
 const changing = image.slice();
 changing.set(new TextEncoder().encode('Changing memory'), 0x2e);
 changing.set([0xAC, 0x34, 0x12, 0x2F, 0xFB], 0x100 + 0x200);
 for (let i = 0; i < 256; i++) changing[0x100 + 0x8000 + i] = i;
 await page.locator('input[accept=".spc"]').setInputFiles({ name: 'changing-memory.spc', mimeType: 'application/octet-stream', buffer: Buffer.from(changing) });
+await setLibraryOpen(page, true);
 await page.locator('.track-list button').first().click();
+await setLibraryOpen(page, false);
 await page.locator('.now-playing strong').filter({ hasText: 'Changing memory' }).waitFor();
 await selectMemoryView(page, 'bytes');
 const bytePixels = new Set();
 for (let i = 0; i < 20; i++) {
-  bytePixels.add(await canvas.evaluate(c => [...c.getContext('2d').getImageData(0x34, 0x12, 1, 1).data].join(',')));
+  bytePixels.add((await canvas.evaluate(readMemoryCanvas, { x: 0x34, y: 0x12 })).join(','));
   await page.waitForTimeout(30);
 }
 assert(bytePixels.size > 1, 'Actual ARAM byte pixels must change with the running INC fixture');
 await selectMemoryView(page, 'bits');
 const bitPixels = new Set();
-for (let i = 0; i < 12; i++) { bitPixels.add(await canvas.evaluate(c => [...c.getContext('2d').getImageData(0x34 * 4, 0x12 * 2, 4, 2).data].join(','))); await page.waitForTimeout(30); }
+for (let i = 0; i < 12; i++) { bitPixels.add((await canvas.evaluate(readMemoryCanvas, { x: 0x34 * 4, y: 0x12 * 2, width: 4, height: 2 })).join(',')); await page.waitForTimeout(30); }
 assert(bitPixels.size > 1, 'Actual bit pixels must change with the running INC fixture');
 await page.getByRole('button', { name: 'Settings', exact: true }).click();
 await page.locator('.setting-row select').selectOption('grayscale');
@@ -98,7 +110,7 @@ for (let i = 0; i < 12; i++) {
     }
     const record = history.latest(), previous = history.previous(record);
     const mask = record.payload[0x1234] ^ previous.payload[0x1234];
-    return { mask, pixels: [...c.getContext('2d').getImageData(0x34, 0x12, 1, 1).data] };
+    return { mask, pixels: window.readMemoryCanvas(c, { x: 0x34, y: 0x12 }) };
   });
   const expected = reading.mask;
   assert.deepEqual(reading.pixels, [expected, expected, expected, 255]);
@@ -106,11 +118,11 @@ for (let i = 0; i < 12; i++) {
 }
 assert(sawChange, 'XOR pixels must match real retained byte changes');
 await selectMemoryView(page, 'entropy');
-assert.deepEqual(await canvas.evaluate(c => [...c.getContext('2d').getImageData(0, 0x80, 1, 1).data]), [255, 255, 255, 255]);
-assert.deepEqual(await canvas.evaluate(c => [...c.getContext('2d').getImageData(0, 0x90, 1, 1).data]), [0, 0, 0, 255]);
+assert.deepEqual(await canvas.evaluate(readMemoryCanvas, { x: 0, y: 0x80 }), [255, 255, 255, 255]);
+assert.deepEqual(await canvas.evaluate(readMemoryCanvas, { x: 0, y: 0x90 }), [0, 0, 0, 255]);
 await selectMemoryView(page, 'bits');
 await page.getByRole('button', { name: '1:1', exact: true }).click();
-const mapViewport = await canvas.getAttribute('style');
+const mapViewport = await canvas.evaluate(c => ({ scale: c.dataset.viewScale, x: c.dataset.offsetX, y: c.dataset.offsetY }));
 await page.getByRole('button', { name: 'Waterfall', exact: true }).click();
 const waterfall = page.locator('.waterfall-plot canvas');
 assert.equal(await waterfall.getAttribute('data-span'), '65536');
@@ -118,7 +130,7 @@ await page.getByRole('button', { name: '1:1', exact: true }).click();
 assert.equal(await waterfall.getAttribute('data-span'), await waterfall.getAttribute('data-columns'));
 const waterfallSpan = await waterfall.getAttribute('data-span');
 await page.getByRole('button', { name: 'Map', exact: true }).click();
-assert.equal(await canvas.getAttribute('style'), mapViewport);
+assert.deepEqual(await canvas.evaluate(c => ({ scale: c.dataset.viewScale, x: c.dataset.offsetX, y: c.dataset.offsetY })), mapViewport);
 await page.getByRole('button', { name: 'Waterfall', exact: true }).click();
 assert.equal(await waterfall.getAttribute('data-span'), waterfallSpan);
 await page.getByRole('button', { name: 'Fit', exact: true }).click();
@@ -139,14 +151,17 @@ page = await context.newPage();
 watch(page);
 await page.goto(url, { waitUntil: 'domcontentloaded' });
 await page.locator('input[accept=".spc"]').setInputFiles(upload);
+await setLibraryOpen(page, true);
 await page.locator('.track-list button').first().click();
-await page.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ timeout: 15_000 });
+await setLibraryOpen(page, false);
+await page.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ state: 'attached', timeout: 15_000 });
 await page.locator('.transport time').filter({ hasText: '00:01' }).waitFor({ timeout: 10_000 });
 
 const fresh = await browser.newContext({ viewport: { width: 390, height: 844 } });
 let freshPage = await fresh.newPage();
 watch(freshPage);
 await freshPage.goto(url, { waitUntil: 'networkidle' });
+await setLibraryOpen(freshPage, false);
 await freshPage.getByRole('button', { name: 'Settings' }).click();
 await freshPage.getByText('Available offline', { exact: true }).waitFor({ timeout: 20_000 });
 await freshPage.close();
@@ -155,8 +170,10 @@ freshPage = await fresh.newPage();
 watch(freshPage);
 await freshPage.goto(url, { waitUntil: 'domcontentloaded' });
 await freshPage.locator('input[accept=".spc"]').setInputFiles(upload);
+await setLibraryOpen(freshPage, true);
 await freshPage.locator('.track-list button').first().click();
-await freshPage.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ timeout: 15_000 });
+await setLibraryOpen(freshPage, false);
+await freshPage.locator('.now-playing .eyebrow').filter({ hasText: 'Playing' }).waitFor({ state: 'attached', timeout: 15_000 });
 await freshPage.locator('.transport time').filter({ hasText: '00:01' }).waitFor({ timeout: 10_000 });
 await fresh.close();
 

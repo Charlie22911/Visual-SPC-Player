@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 export const browserLaunchOptions = {
   headless: true,
+  ...(process.env.SPC_BROWSER_SOFTWARE ? { args: ['--use-angle=swiftshader','--enable-unsafe-swiftshader'] } : {}),
   ...(process.env.SPC_BROWSER_CHANNEL ? { channel: process.env.SPC_BROWSER_CHANNEL } : {}),
 };
 

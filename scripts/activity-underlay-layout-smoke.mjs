@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { browserLaunchOptions } from './browser-environment.mjs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { selectMemoryView } from './browser-view-helpers.mjs';
+import { selectMemoryView, setLibraryOpen } from './browser-view-helpers.mjs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const browser = await chromium.launch(browserLaunchOptions);
 const errors = [];
@@ -21,7 +21,7 @@ const measure = page => page.evaluate(() => {
     canvasWidth: canvas.width, canvasHeight: canvas.height, canvasStyle: canvas.getAttribute('style'),
     columns: canvas.dataset.columns, start: canvas.dataset.start, span: canvas.dataset.span,
     legendHeight: legend.getBoundingClientRect().height,
-    footerHeight: document.querySelector('.visual-status').getBoundingClientRect().height };
+    footerHeight: document.querySelector('.app-footer').getBoundingClientRect().height };
 });
 const settle = async page => {
   // Let React, ResizeObserver, and the canvas reconfiguration commit together.
@@ -41,6 +41,7 @@ try {
     await page.goto(c.local ? pathToFileURL(resolve('Visual-SPC-Player.html')).href : process.env.SPC_PREVIEW_URL || 'http://127.0.0.1:4173/', { waitUntil: 'networkidle' });
     await page.locator('input[accept=".spc"]').setInputFiles({ name: 'layout.spc', mimeType: 'application/octet-stream', buffer: Buffer.from(image) });
     await page.locator('.track-list button').first().click();
+    await setLibraryOpen(page, false);
     await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
     await page.waitForTimeout(300);
     await page.getByRole('button', { name: 'Pause', exact: true }).click();
@@ -75,11 +76,11 @@ try {
       }
     }
     await page.getByLabel('Show bits underneath').check();
-    assert.equal(await page.locator('.legend').evaluate(legend => {
-      legend.scrollLeft = legend.scrollWidth;
-      return legend.scrollWidth <= legend.clientWidth || legend.scrollLeft > 0;
-    }), true, 'Overflowing legend text remains available through horizontal scrolling');
+    assert.equal(await page.locator('.legend').evaluate(legend => legend.title === legend.textContent), true,
+      'The full legend remains available as a hover label when the fixed footer shortens it');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    assert.equal(await page.locator('.app-footer').evaluate(footer => footer.getBoundingClientRect().bottom <= innerHeight && footer.getBoundingClientRect().top >= 0), true,
+      'The unified footer remains inside the viewport');
     console.log(c.name, 'Byte and Bit: unchanged plot, canvas, buckets, and time intervals passed');
     await page.close();
   }

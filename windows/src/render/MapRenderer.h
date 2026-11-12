@@ -15,14 +15,16 @@ class MapRenderer {
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> inputs_[6], output_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> targetView_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertex_;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_, areaPixel_;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> presentation_;
     bool previousValid_ = false;
     unsigned width_ = 0, height_ = 0;
 public:
     MapRenderer(ID3D11Device*, ID3D11DeviceContext*);
     void upload(const HistoryRecord&, const HistoryRecord*,
         const std::array<uint8_t, 24576>&, const std::array<uint8_t, 65536>&, const std::vector<float>&);
-    void draw(const ViewConfig&, unsigned palette, bool persistent);
+    void draw(const ViewConfig&, unsigned palette, bool persistent, unsigned outputWidth = 0, unsigned outputHeight = 0,
+        float originX = 0, float originY = 0, float cell = 1, float cellY = 0);
     ID3D11ShaderResourceView* texture() const noexcept { return output_.Get(); }
     std::vector<uint32_t> readback(); // fixtures only
 };

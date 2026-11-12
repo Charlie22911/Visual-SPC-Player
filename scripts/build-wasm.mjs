@@ -39,3 +39,5 @@ if (process.platform === 'win32') {
   run('emcmake', ['cmake', '-S', native, '-B', build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release']);
   run('cmake', ['--build', build]);
 }
+// The complete source is available offline from About in both distributions.
+run('python', ['windows/tools/embed-source.py', '--output', 'public/Visual-SPC-Player-source.zip']);

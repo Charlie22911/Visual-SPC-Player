@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { browserLaunchOptions } from './browser-environment.mjs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { selectMemoryView } from './browser-view-helpers.mjs';
+import { selectMemoryView, setLibraryOpen, installMemoryTools } from './browser-view-helpers.mjs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const browser = await chromium.launch(browserLaunchOptions);
 const errors = [];
@@ -37,6 +37,8 @@ try {
     await page.goto(url, { waitUntil: 'networkidle' });
     await page.locator('input[accept=".spc"]').setInputFiles({ name: 'retention.spc', mimeType: 'application/octet-stream', buffer: Buffer.from(image) });
     await page.locator('.track-list button').first().click();
+    await setLibraryOpen(page, false);
+    await installMemoryTools(page);
     await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
     if (name === 'desktop') await page.waitForTimeout(12000);
     await page.getByRole('button', { name: 'Pause', exact: true }).click();
@@ -87,14 +89,13 @@ try {
           const canvas = document.querySelector('.waterfall-plot canvas');
           const config = renderer.config;
           const checks = [1, Math.floor(config.height / 2), config.height - 1].map(y => renderer.inspect(0, y).row.valid);
-          const ctx = canvas.getContext('2d');
-          const pixel = ctx.getImageData(0, canvas.height - 2, 1, 1).data;
+          const pixel = window.readMemoryCanvas(canvas, { x: 0, y: canvas.height - 2, space: 'physical' });
           return { height: canvas.height, plotHeight: canvas.parentElement.clientHeight, dpr: devicePixelRatio,
             pending: renderer.pendingCount, checks, records: history.count, bottomPixel: [...pixel] };
         });
         if (height === undefined) height = result.height;
         assert.equal(result.height, height, 'Changing the time window must preserve the plot height');
-        assert.equal(result.height, result.plotHeight * result.dpr);
+        assert.equal(result.height, Math.round(result.plotHeight * result.dpr));
         assert.deepEqual(result.checks, [true, true, true], 'The bottom of every window needs retained data and an XOR baseline');
         assert.equal(result.records, capture.count, 'Changing the window must not clear or downsample history');
         if (mode === 'bytes' || mode === 'activity') assert.notDeepEqual(result.bottomPixel, [16, 23, 34, 255], 'The displayed bottom pixel must be populated');

@@ -12,12 +12,13 @@ export type WorkletCommand =
   | { type: 'restart'; loadId: number }
   | { type: 'volume'; gain: number }
   | { type: 'view'; requestId: number; mode: AramMode; hz: number; displaySync?: boolean }
+  | { type: 'spectrum'; epoch: number; port: MessagePort | null }
   | { type: 'recycle'; buffer: ArrayBuffer };
 
 export type WorkletEvent =
   | { type: 'ready'; sampleRate: number; abiVersion: number }
   | { type: 'loaded'; loadId: number; generation: number; paused: boolean }
-  | { type: 'state'; commandId?: number; playing: boolean; paused: boolean; generation: number; audibleFrame: number; droppedSnapshots: number }
+  | { type: 'state'; commandId?: number; playing: boolean; paused: boolean; generation: number; audibleFrame: number; contextTime?: number; droppedSnapshots: number }
   | { type: 'snapshot'; generation: number; requestId: number; sequence: number; audibleFrame: number; payload: ArrayBuffer }
   | { type: 'error'; loadId?: number; fatal?: boolean; message: string };
 

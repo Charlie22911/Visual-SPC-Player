@@ -17,6 +17,7 @@ runInNewContext(await readFile(new URL(workletName, assets), 'utf8'), {
   },
   registerProcessor: (_name, constructor) => { Processor = constructor; },
   sampleRate: 48_000,
+  currentTime: 0,
   WebAssembly, ArrayBuffer, Uint8Array, Int16Array, Float32Array, DataView, Math,
 });
 const processor = new Processor();

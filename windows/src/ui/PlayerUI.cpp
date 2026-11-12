@@ -5,12 +5,19 @@
 #include "audio/AudioEngine.h"
 #include "model/Library.h"
 #include "model/Settings.h"
+#include "model/MapSampling.h"
+#include "audio/SpectrumWorker.h"
+#include "render/SpectrogramRenderer.h"
+#include "model/SpectrumColors.h"
+#include "model/PaletteTables.h"
 #include "model/PresentationState.h"
 #include "platform/Files.h"
 #include "render/MapRenderer.h"
 #include "render/WaterfallRenderer.h"
 #include "imgui.h"
 #include <shlwapi.h>
+#include <psapi.h>
+#include <fstream>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -48,6 +55,15 @@ struct PlayerUI::Impl {
     Settings settings;
     History history;
     Metrics metrics;
+    SpectrumWorker spectrumWorker{audio.spectrum(),false};
+    std::unique_ptr<SpectrogramRenderer> spectrumRenderer;
+    unsigned spectrumWidth=1024,spectrumHeight=512;
+    uint64_t spectrumEpoch=1,spectrumStagingDrops=0;
+    std::vector<SpectrumResult> spectrumStaging=std::vector<SpectrumResult>(128);
+    std::array<bool,128> spectrumStaged{};
+    double spectrumReportAt=now100ns(),spectrumBegan=spectrumReportAt;
+    std::deque<nlohmann::json> spectrumReport;
+
     std::unique_ptr<MapRenderer> mapRenderer;
     std::unique_ptr<WaterfallRenderer> waterfallRenderer;
     std::filesystem::path storage, root, folder;
@@ -79,6 +95,7 @@ struct PlayerUI::Impl {
     ClockAnchor anchor{};
     double mediaFrame = 0, fpsAt = now100ns(), actualFps = 0, renderMilliseconds = 0;
     unsigned frameCounter = 0;
+    float headerMin=1e9f,headerMax=0;
     int panel = 0;
     std::string status;
     bool mapFit = true;
@@ -90,6 +107,7 @@ struct PlayerUI::Impl {
         try {
             storage = dataDirectory();
             if (std::filesystem::exists(storage / L"settings.json")) settings = parseSettings(readText(storage / L"settings.json"));
+            if (settings.spectrogram) panel = 3;
             try { if (std::filesystem::exists(storage / L"layout.json")) {
                 const auto layout = nlohmann::json::parse(readText(storage / L"layout.json", 4096));
                 sidebar.open = layout.value("libraryOpen", true);
@@ -114,6 +132,7 @@ struct PlayerUI::Impl {
     }
     void resetGraphics(D3DDevice& device) {
         graphics = &device;
+        spectrumRenderer.reset();
         mapRenderer = std::make_unique<MapRenderer>(device.device.Get(), device.context.Get());
         waterfallRenderer = std::make_unique<WaterfallRenderer>(device.device.Get(), device.context.Get());
         mapDirty = true;
@@ -228,7 +247,7 @@ struct PlayerUI::Impl {
             mediaFrame = anchor.mediaFrame + std::min(elapsed, anchor.remainingDeviceFrames) * anchor.sourceStep;
             if (history.present(anchor.generation, mediaFrame)) { ++presented; mapDirty = true; updateMapAccess(); }
         }
-        if (settings.persistence && history.selected()) {
+        if (settings.persistence && panel==0 && !settings.waterfall && settings.mode==0 && history.selected()) {
             for (unsigned a = 0; a < 65536; ++a)
                 visibleKinds[a] = mediaFrame - static_cast<double>(seenAt[a]) <= settings.persistenceMilliseconds * 32 ? heldKinds[a] : 0;
             mapDirty = true;
@@ -317,11 +336,166 @@ struct PlayerUI::Impl {
         if (actions.restart && current) load(current->path, false);
         if (actions.volumeChanged) saveSettings();
     }
+    SpectrumView spectrumView() const {
+        SpectrumView v;
+        v.width=spectrumWidth; v.height=spectrumHeight;
+        v.fftSize=settings.spectrumFft; v.hopSize=settings.spectrumHop; v.sampling=settings.spectrumSampling;
+        v.seconds=settings.spectrumSeconds; v.temporalMs=settings.spectrumTemporalMs; v.palette=settings.spectrumPalette;
+        v.logarithmic=settings.spectrumLog; v.temporal=settings.spectrumTemporal; v.difference=settings.spectrumDifference;
+        v.floorDb=settings.spectrumFloor; v.ceilingDb=settings.spectrumCeiling; return v;
+    }
+    void maintainGraphics(bool visible=true) {
+        spectrumEpoch=spectrumWorker.setActive(panel==3 && visible);
+        if(panel!=3 || !visible) {
+            spectrumRenderer.reset(); spectrumStaged.fill(false);
+            while(spectrumWorker.results().consumer_slot()) spectrumWorker.results().consume();
+            return;
+        }
+        spectrumEpoch=spectrumWorker.configure(settings.spectrumFft,settings.spectrumHop);
+        if(!spectrumRenderer) spectrumRenderer=std::make_unique<SpectrogramRenderer>(graphics->device.Get(),graphics->context.Get());
+        try { spectrumRenderer->configure(spectrumView(),spectrumEpoch,anchor.generation); }
+        catch(const std::exception& error) {
+            if(FAILED(graphics->device->GetDeviceRemovedReason())) throw;
+            status=error.what(); return;
+        }
+        const auto start=std::chrono::steady_clock::now();
+        auto expired=[&] { return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()>0.6; };
+        // Process staged generations in their original FIFO order; fixed storage bounds memory.
+        for(size_t i=0;i<spectrumStaging.size();++i) if(spectrumStaged[i]) {
+            const auto& r=spectrumStaging[i];
+            if(r.stamp.analysisEpoch!=spectrumEpoch || r.stamp.generation<anchor.generation) spectrumStaged[i]=false;
+        }
+        while(!expired()) {
+            size_t best=spectrumStaging.size();
+            for(size_t i=0;i<spectrumStaging.size();++i) if(spectrumStaged[i] && spectrumStaging[i].stamp.generation==anchor.generation &&
+                spectrumStaging[i].stamp.endFrame<=mediaFrame+16000 && (best==spectrumStaging.size() || spectrumStaging[i].stamp.rowSequence<spectrumStaging[best].stamp.rowSequence)) best=i;
+            if(best==spectrumStaging.size()) break;
+            spectrumRenderer->upload(spectrumStaging[best],mediaFrame); spectrumStaged[best]=false;
+        }
+        while(!expired()) {
+            const auto* result=spectrumWorker.results().consumer_slot(); if(!result) break;
+            if(result->stamp.analysisEpoch==spectrumEpoch && result->stamp.generation>=anchor.generation) {
+                if(result->stamp.generation==anchor.generation && result->stamp.endFrame<=mediaFrame+16000)
+                    spectrumRenderer->upload(*result,mediaFrame);
+                else {
+                    const auto free=std::find(spectrumStaged.begin(),spectrumStaged.end(),false);
+                    if(free!=spectrumStaged.end()) { const auto i=static_cast<size_t>(free-spectrumStaged.begin()); spectrumStaging[i]=*result; spectrumStaged[i]=true; }
+                    else ++spectrumStagingDrops;
+                }
+            }
+            spectrumWorker.results().consume();
+        }
+    }
+    void recordSpectrumReport() {
+        const auto now=now100ns();
+        if((smoke || settings.diagnostic) && now-spectrumReportAt>=10000000) {
+            const auto s=spectrumRenderer?spectrumRenderer->stats():SpectrumRenderStats{};
+            PROCESS_MEMORY_COUNTERS_EX mem{}; mem.cb=sizeof(mem);
+            K32GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&mem),sizeof(mem));
+            spectrumReport.push_back({{"seconds",(now-spectrumBegan)/10000000}, {"audibleFrame",mediaFrame},
+                {"spectrumActive",spectrumWorker.active()},{"captureEnabled",audio.spectrum().captureEnabled()},{"panel",panel},
+                {"generation",anchor.generation},{"analysed",spectrumWorker.analysedRows()},{"consumedPackets",spectrumWorker.consumedPackets()},
+                {"workerDropped",spectrumWorker.droppedResults()},{"stagingDropped",spectrumStagingDrops},{"uploaded",s.uploaded},
+                {"pcmQueued",audio.spectrum().approximate_size()},{"resultQueued",spectrumWorker.results().approximate_size()},
+                {"pcmHighWater",spectrumWorker.pcmHighWater()},{"resultHighWater",spectrumWorker.resultHighWater()},
+                {"pcmDropped",audio.spectrum().dropped()},{"newestAnalysedGeneration",spectrumWorker.newestGeneration()},
+                {"newestAnalysedFrame",spectrumWorker.newestFrame()},
+                {"projected",s.projected},{"draws",s.draws},{"pending",s.pending},{"graphicsBytes",s.bytes},
+                {"privateBytes",mem.PrivateUsage},{"workingSet",mem.WorkingSetSize},{"uiDrawMs",renderMilliseconds},
+                {"uploadSubmitMs",s.uploadMs},{"projectionSubmitMs",s.projectionMs},{"drawSubmitMs",s.drawMs},{"status",status}});
+            if(spectrumReport.size()>4096) spectrumReport.pop_front(); spectrumReportAt=now;
+        }
+    }
     void zoomWaterfall(double factor, double anchorFraction = 0.5) {
         const double address = waterfallStart + waterfallSpan * anchorFraction;
         waterfallSpan = static_cast<uint32_t>(std::clamp(std::round(waterfallSpan * factor), 1.0, 65536.0));
         waterfallStart = static_cast<uint32_t>(std::clamp(std::round(address - waterfallSpan * anchorFraction), 0.0, 65536.0 - waterfallSpan));
         waterfallFit = false;
+    }
+    void spectrogramPanel() {
+        FlowToolbar row;
+        const float controlDpi=ImGui::GetStyle().FontScaleDpi;
+        bool changed=false, custom=false;
+        row.next(160*controlDpi); ImGui::SetNextItemWidth(160*controlDpi);
+        if(ImGui::Combo("##spectrumPreset",&settings.spectrumPreset,"Balanced\0Transient detail\0Frequency detail\0Raw analysis\0Custom\0")) {
+            changed=true;
+            if(settings.spectrumPreset<4) {
+                settings.spectrumFft=settings.spectrumPreset==1?1024:settings.spectrumPreset==2?4096:2048;
+                settings.spectrumHop=settings.spectrumPreset==1?64:256;
+                settings.spectrumSampling=settings.spectrumPreset==3?0:1;
+                settings.spectrumTemporal=settings.spectrumPreset==0 || settings.spectrumPreset==2;
+                settings.spectrumTemporalMs=settings.spectrumTemporal?25:0;
+            }
+        }
+        row.next(FlowToolbar::toggleWidth("Stereo difference")); changed |= ImGui::Checkbox("Stereo difference",&settings.spectrumDifference);
+        if(ImGui::IsItemHovered()) ImGui::SetTooltip("Brightness = strength of (Left - Right) / 2. Identical channels are black; phase differences are included. Uses the dBFS floor/top controls.");
+        row.next(125*controlDpi); ImGui::SetNextItemWidth(125*controlDpi);
+        ImGui::BeginDisabled(settings.spectrumDifference);
+        changed |= ImGui::Combo("##spectrumPalette",&settings.spectrumPalette,"Green\0Heat\0Grayscale\0");
+        ImGui::EndDisabled();
+        if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip(settings.spectrumDifference ? "Stereo difference uses grayscale brightness." : "Spectrogram colour: quiet levels are dark, strong levels are bright. Independent of the ARAM palette.");
+        row.next(110*controlDpi);
+        {
+            const auto at=ImGui::GetCursorScreenPos(); const float height=ImGui::GetFrameHeight();
+            ImGui::Dummy(ImVec2(110*controlDpi,height));
+            auto* colors=ImGui::GetWindowDrawList();
+            for(unsigned i=0;i<110;++i) colors->AddRectFilled(ImVec2(at.x+i*controlDpi,at.y+height*0.25f),ImVec2(at.x+(i+1)*controlDpi,at.y+height*0.75f),spectrumColor(i*255/109,settings.spectrumDifference?2:settings.spectrumPalette));
+            if(ImGui::IsItemHovered()) ImGui::SetTooltip("Left: %.0f dBFS floor; right: %.0f dBFS top",settings.spectrumFloor,settings.spectrumCeiling);
+        }
+        row.next(120*controlDpi); ImGui::SetNextItemWidth(120*controlDpi);
+        custom |= ImGui::Combo("##spectrumSampling",&settings.spectrumSampling,"Nearest\0Smooth\0Area\0");
+        row.next(FlowToolbar::toggleWidth("Log frequency")); changed |= ImGui::Checkbox("Log frequency",&settings.spectrumLog);
+        row.next(100*controlDpi); ImGui::SetNextItemWidth(100*controlDpi);
+        int fft=settings.spectrumFft==1024?0:settings.spectrumFft==2048?1:2;
+        if(ImGui::Combo("##fftSize",&fft,"FFT 1024\0FFT 2048\0FFT 4096\0")) { settings.spectrumFft=1024<<fft; custom=true; }
+        row.next(110*controlDpi); ImGui::SetNextItemWidth(110*controlDpi);
+        int hop=settings.spectrumHop==64?0:settings.spectrumHop==128?1:settings.spectrumHop==256?2:3;
+        if(ImGui::Combo("##analysisHop",&hop,"Hop 64\0Hop 128\0Hop 256\0Hop 512\0")) { settings.spectrumHop=64<<hop; custom=true; }
+        if(ImGui::IsItemHovered()) ImGui::SetTooltip("Samples between analyses: smaller values give more closely spaced time rows at higher processing cost.");
+        row.next(FlowToolbar::toggleWidth("Temporal smoothing")); if(ImGui::Checkbox("Temporal smoothing",&settings.spectrumTemporal)) { custom=true; if(settings.spectrumTemporal && !settings.spectrumTemporalMs) settings.spectrumTemporalMs=25; }
+        if(settings.spectrumTemporal) { row.next(130*controlDpi); ImGui::SetNextItemWidth(130*controlDpi); custom |= ImGui::SliderInt("##spectrumTemporalMs",&settings.spectrumTemporalMs,1,200,"%d ms"); }
+        row.next(90*controlDpi); ImGui::SetNextItemWidth(90*controlDpi);
+        const char* durations[]={"2 s","5 s","10 s"}; int duration=settings.spectrumSeconds==2?0:settings.spectrumSeconds==5?1:2;
+        if(ImGui::Combo("##spectrumSeconds",&duration,durations,3)) { settings.spectrumSeconds=duration==0?2:duration==1?5:10; changed=true; }
+        row.next(130*controlDpi); ImGui::SetNextItemWidth(130*controlDpi);
+        changed |= ImGui::SliderFloat("##floor",&settings.spectrumFloor,-120,-30,"Floor %.0f dBFS");
+        row.next(130*controlDpi); ImGui::SetNextItemWidth(130*controlDpi);
+        changed |= ImGui::SliderFloat("##ceiling",&settings.spectrumCeiling,-30,0,"Top %.0f dBFS");
+        if(custom) { settings.spectrumPreset=4; changed=true; }
+        if(changed) saveSettings();
+        // The tab may have been selected during this frame, after main-loop
+        // maintenance ran for the previously active tab.
+        if(!spectrumRenderer) maintainGraphics();
+        const auto origin=ImGui::GetCursorScreenPos(), available=ImGui::GetContentRegionAvail();
+        const float dpi=ImGui::GetStyle().FontScaleDpi;
+        const auto fb=ImGui::GetIO().DisplayFramebufferScale;
+        const ImVec2 graph(std::round((origin.x+45*dpi)*fb.x)/fb.x,std::round((origin.y+22*dpi)*fb.y)/fb.y);
+        const ImVec2 size(std::max(1.0f,std::floor((origin.x+available.x-graph.x)*fb.x))/fb.x,std::max(1.0f,std::floor((origin.y+available.y-graph.y)*fb.y))/fb.y);
+        ImGui::InvisibleButton("##spectrum",ImVec2(std::max(1.0f,available.x),std::max(1.0f,available.y)));
+        const unsigned w=std::max(1u,static_cast<unsigned>(std::round(size.x*fb.x))),h=std::max(1u,static_cast<unsigned>(std::round(size.y*fb.y)));
+        spectrumWidth=w; spectrumHeight=h;
+        spectrumEpoch=spectrumWorker.configure(settings.spectrumFft,settings.spectrumHop);
+        spectrumRenderer->configure(spectrumView(),spectrumEpoch,anchor.generation);
+        spectrumRenderer->update();
+        spectrumRenderer->draw(mediaFrame);
+        const auto frequency=[&](double fraction) { return settings.spectrumLog ? 20.0*std::pow(800.0,fraction) : 16000.0*fraction; };
+        auto* draw=ImGui::GetWindowDrawList();
+        draw->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerNearest,nullptr);
+        draw->AddImage(ImTextureRef(reinterpret_cast<ImTextureID>(spectrumRenderer->texture())),graph,ImVec2(graph.x+size.x,graph.y+size.y));
+        draw->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerLinear,nullptr);
+        for(unsigned tick=0;tick<=4;++tick) {
+            char label[48]; std::snprintf(label,sizeof(label),"%.0f Hz",frequency(tick/4.0));
+            draw->AddText(ImVec2(graph.x+(size.x-65*dpi)*tick/4,origin.y),IM_COL32(190,210,220,255),label);
+            std::snprintf(label,sizeof(label),"-%.1fs",settings.spectrumSeconds*tick/4.0);
+            draw->AddText(ImVec2(origin.x,graph.y+(size.y-ImGui::GetTextLineHeight())*tick/4),IM_COL32(190,210,220,255),label);
+        }
+        if(ImGui::IsItemHovered()) {
+            const auto mouse=ImGui::GetIO().MousePos;
+            const double f=frequency(std::clamp((mouse.x-graph.x)/size.x,0.0f,1.0f));
+            ImGui::SetTooltip("%.1f Hz; %.3f s ago\n%s; Hann %d, hop %d; 32 kHz, pre-volume",f,std::clamp((mouse.y-graph.y)/size.y,0.0f,1.0f)*settings.spectrumSeconds,settings.spectrumDifference?"Stereo difference (L-R)/2":"Stereo power",settings.spectrumFft,settings.spectrumHop);
+        }
+        footerText.legend=settings.spectrumDifference?"Brightness: (L-R)/2 power; identical channels black; includes phase differences":"Power before playback volume; 0 dBFS = full-scale sine";
+        footerText.inspection="Spectrogram: stereo audio power / dBFS; frequency left to right, newest audio at top";
     }
     void memoryPanel() {
         bool changed = false;
@@ -340,7 +514,7 @@ struct PlayerUI::Impl {
         controls.next(FlowToolbar::buttonWidth("Fit"));
         if (ImGui::Button("Fit")) { if (settings.waterfall) { waterfallStart = 0; waterfallSpan = 65536; waterfallFit = true; } else mapFit = true; }
         controls.next(FlowToolbar::buttonWidth("1:1"));
-        if (ImGui::Button("1:1")) { if (settings.waterfall) { waterfallSpan = std::max(1u, lastColumns); waterfallStart = std::min(waterfallStart, 65536 - waterfallSpan); waterfallFit = false; } else { mapScale = 1; mapFit = false; } }
+        if (ImGui::Button("1:1")) { if (settings.waterfall) { waterfallSpan = std::max(1u, lastColumns); waterfallStart = std::min(waterfallStart, 65536 - waterfallSpan); waterfallFit = false; } else { mapScale = 1 / (ImGui::GetStyle().FontScaleDpi * ImGui::GetIO().DisplayFramebufferScale.x); mapFit = false; } }
         controls.next(FlowToolbar::buttonWidth("+"));
         if (ImGui::Button("+")) { if (settings.waterfall) zoomWaterfall(0.5); else { mapScale = clampMapScale(mapScale * 2); mapFit = false; } }
         if (settings.waterfall) {
@@ -350,6 +524,21 @@ struct PlayerUI::Impl {
         }
         if (settings.mode == 1) { controls.next(FlowToolbar::toggleWidth("XOR")); changed |= ImGui::Checkbox("XOR", &settings.xorData); }
         if (settings.mode == 0) { controls.next(FlowToolbar::toggleWidth("Show data underneath")); changed |= ImGui::Checkbox("Show data underneath", &settings.underlay); }
+        {
+            controls.next(130 * ImGui::GetStyle().FontScaleDpi);
+            ImGui::SetNextItemWidth(130 * ImGui::GetStyle().FontScaleDpi);
+            int& samplingChoice = settings.waterfall ? settings.waterfallSampling : settings.mapSampling;
+            changed |= ImGui::Combo("##sampling", &samplingChoice, "Nearest\0Smooth\0Area\0");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Sampling: Nearest selects cells; Smooth blends colors; Area summarizes covered cells and preserves activity.");
+        }
+        if(settings.waterfall) {
+            controls.next(FlowToolbar::toggleWidth("Temporal smoothing"));
+            ImGui::BeginDisabled(settings.mode==0 && !settings.underlay);
+            changed |= ImGui::Checkbox("Temporal smoothing", &settings.waterfallTemporal);
+            ImGui::EndDisabled();
+            if(ImGui::IsItemHovered()) ImGui::SetTooltip("Time-based numeric low-pass for Data, Entropy and the data underlay. Activity markers retain their original timing.");
+            if(settings.waterfallTemporal) { controls.next(150*ImGui::GetStyle().FontScaleDpi); ImGui::SetNextItemWidth(150*ImGui::GetStyle().FontScaleDpi); changed |= ImGui::SliderInt("##temporalDuration",&settings.waterfallTemporalMs,10,200,"%d ms"); }
+        }
         if (changed) saveSettings();
         const auto available = ImGui::GetContentRegionAvail();
         const ImVec2 plotSize(std::max(1.0f, available.x), std::max(1.0f, available.y));
@@ -386,13 +575,29 @@ struct PlayerUI::Impl {
                 mapEntropy = view.measurement == Measurement::Entropy ? metrics.entropy(selected->ram, view.bits) : std::vector<float>{};
                 mapRenderer->upload(*selected, history.previous(*selected), mapAccess.bytes(), visibleKinds, mapEntropy); mapDirty = false;
             }
-            mapRenderer->draw(view, settings.palette, settings.persistence);
+
             mapAccess.drawn();
             const float cell = physicalMapScale(mapScale, dpi);
-            const ImVec2 top(origin.x + plotSize.x / 2 - mapCenterX * width * cell,
+            ImVec2 top(origin.x + plotSize.x / 2 - mapCenterX * width * cell,
                 origin.y + plotSize.y / 2 - mapCenterY * height * cell);
-            draw->AddImage(ImTextureRef(reinterpret_cast<ImTextureID>(mapRenderer->texture())), top,
-                ImVec2(top.x + width * cell, top.y + height * cell));
+            const auto fb = ImGui::GetIO().DisplayFramebufferScale;
+            if (cell * fb.x >= 1 && std::abs(cell * fb.x - std::round(cell * fb.x)) < 0.0001f) { top.x = std::round(top.x * fb.x) / fb.x; top.y = std::round(top.y * fb.y) / fb.y; }
+            const bool area = settings.mapSampling == 2 && (cell * fb.x < 1 || cell * fb.y < 1);
+            if (area) {
+                const ImVec2 targetOrigin(std::floor(origin.x * fb.x) / fb.x, std::floor(origin.y * fb.y) / fb.y);
+                const unsigned targetWidth = static_cast<unsigned>(std::ceil((origin.x + plotSize.x) * fb.x) - targetOrigin.x * fb.x);
+                const unsigned targetHeight = static_cast<unsigned>(std::ceil((origin.y + plotSize.y) * fb.y) - targetOrigin.y * fb.y);
+                mapRenderer->draw(view, settings.palette, settings.persistence, targetWidth, targetHeight,
+                    (top.x - targetOrigin.x) * fb.x, (top.y - targetOrigin.y) * fb.y, cell * fb.x, cell * fb.y);
+                draw->AddImage(ImTextureRef(reinterpret_cast<ImTextureID>(mapRenderer->texture())), targetOrigin,
+                    ImVec2(targetOrigin.x + targetWidth / fb.x, targetOrigin.y + targetHeight / fb.y));
+            } else {
+                mapRenderer->draw(view, settings.palette, settings.persistence);
+                if (settings.mapSampling == 1) draw->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerLinear, nullptr);
+                draw->AddImage(ImTextureRef(reinterpret_cast<ImTextureID>(mapRenderer->texture())), top,
+                    ImVec2(top.x + width * cell, top.y + height * cell));
+                draw->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerNearest, nullptr);
+            }
             const auto x = static_cast<int>((mouse.x - top.x) / cell), y = static_cast<int>((mouse.y - top.y) / cell);
             if (hovered && mouse.x >= top.x && mouse.y >= top.y && x >= 0 && y >= 0 && x < static_cast<int>(width) && y < static_cast<int>(height)) {
                 const unsigned address = view.bits ? (y >> 1) * 256 + (x >> 2) : y * 256 + x;
@@ -408,7 +613,23 @@ struct PlayerUI::Impl {
                         address, selected->ram[address], selected->ram[address] ^ previous->ram[address]);
                     else std::snprintf(buffer, sizeof(buffer), "$%04X · XOR baseline unavailable", address);
                 }
-                inspection = buffer;
+                if (area) {
+                    const double px = std::floor(mouse.x * fb.x) / fb.x, py = std::floor(mouse.y * fb.y) / fb.y;
+                    const auto summary = summarizeMap(*selected, history.previous(*selected), mapAccess.bytes(), mapEntropy,
+                        view.bits, view.changesOnly, view.measurement == Measurement::Entropy,
+                        (px-top.x)/cell, (py-top.y)/cell, (px+1/fb.x-top.x)/cell, (py+1/fb.y-top.y)/cell, &visibleKinds);
+                    ImGui::BeginTooltip();
+                    ImGui::TextUnformatted(buffer);
+                    if (!view.changesOnly || history.previous(*selected)) ImGui::Text("Pixel summary: %u %s cells; mean %.5f%s", summary.cells, view.bits ? "bit" : "byte", summary.mean,
+                        view.measurement == Measurement::Entropy ? " local entropy" : view.bits ? " fraction" : " byte value");
+                    ImGui::Text("%u distinct bytes", summary.bytes);
+                    if (settings.persistence && ((settings.mode == 0 && !view.underlay) || (settings.mode == 1 && !view.changesOnly))) ImGui::Text("Held activity flags: %u", summary.held);
+                    const unsigned shownKinds = settings.mode == 0 && settings.persistence && !view.underlay ? summary.held : summary.kinds;
+                    ImGui::Text("Any activity across cells: R:%u W:%u X:%u", shownKinds&1, (shownKinds>>1)&1, (shownKinds>>2)&1);
+                    if (view.changesOnly) ImGui::TextUnformatted(history.previous(*selected) ? (summary.changed ? "Changes present" : "No changes") : "XOR baseline unavailable");
+                    ImGui::EndTooltip();
+                }
+                inspection = std::string(buffer) + (area ? " · area summary" : settings.mapSampling == 1 ? " · smoothed colors" : "");
                 draw->AddRect(ImVec2(top.x + x * cell, top.y + y * cell),
                     ImVec2(top.x + (x + 1) * cell, top.y + (y + 1) * cell), IM_COL32(255, 255, 255, 220));
             }
@@ -439,8 +660,13 @@ struct PlayerUI::Impl {
             view.start = waterfallStart; view.span = waterfallSpan; view.columns = columns;
             waterfallRenderer->configure(view, sampling.rows, settings.seconds);
             waterfallRenderer->update(history, std::min(4.0, 500.0 / targetRate()));
-            waterfallRenderer->draw(settings.palette);
+            const auto fb = ImGui::GetIO().DisplayFramebufferScale;
+            waterfallRenderer->draw(settings.palette, settings.waterfallSampling,
+                static_cast<unsigned>(std::max(1.0f,std::round(graphSize.x*fb.x))),
+                static_cast<unsigned>(std::max(1.0f,std::round(graphSize.y*fb.y))), settings.waterfallTemporal, static_cast<unsigned>(settings.waterfallTemporalMs));
+            if(settings.waterfallSampling==1) draw->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerLinear,nullptr);
             draw->AddImage(ImTextureRef(reinterpret_cast<ImTextureID>(waterfallRenderer->texture())), graphOrigin, ImVec2(graphOrigin.x + graphSize.x, graphOrigin.y + graphSize.y));
+            draw->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerNearest,nullptr);
             for (int tick = 0; tick <= 4; ++tick) {
                 const auto y = graphOrigin.y + tick * graphSize.y / 4;
                 char label[40]; std::snprintf(label, sizeof(label), "-%.1fs", settings.seconds * tick / 4.0);
@@ -465,7 +691,7 @@ struct PlayerUI::Impl {
                     row.values[lane * columns + column], view.bits ? " (bit lane)" : "", (selected->nativeFrame - (band + 1) * waterfallRenderer->framesPerBand()) / 32000,
                     (selected->nativeFrame - band * waterfallRenderer->framesPerBand()) / 32000);
                 else std::snprintf(buffer, sizeof(buffer), "$%04X–$%04X · unavailable history", range.first, range.second - 1);
-                inspection = buffer;
+                inspection = std::string(buffer) + (settings.waterfallSampling == 1 ? " (smoothed colors; inspected source bucket)" : settings.waterfallSampling == 2 ? " (Area sampling; inspected source bucket)" : "");
             }
         }
         clipping.end();
@@ -533,6 +759,9 @@ struct PlayerUI::Impl {
         ImGui::Text("Display: %.3f Hz · rendering %.3f ms", static_cast<double>(displayNumerator) / displayDenominator, renderMilliseconds);
         if (settings.diagnostic) {
             ImGui::Separator();
+            const auto spectrumStats=spectrumRenderer?spectrumRenderer->stats():SpectrumRenderStats{};
+            ImGui::Text("Spectrum: %llu analyses · %llu draws · %zu pending · %.1f MiB graphics",spectrumWorker.analysedRows(),spectrumStats.draws,spectrumStats.pending,spectrumStats.bytes/1048576.0);
+            ImGui::Text("Spectrum drops: worker %llu · staging %llu",spectrumWorker.droppedResults(),spectrumStagingDrops);
             ImGui::Text("Received %llu · presented %llu · changed %llu", received, presented, changedStates);
             ImGui::Text("Changed bytes %llu · echo %llu · capture drops %u · history rejects %llu", changedBytes, changedEchoBytes, anchor.drops, rejected);
             ImGui::Text("Native frame %llu · audible frame %.3f · captured/presented rates follow the selected cadence", lastNative, mediaFrame);
@@ -552,6 +781,8 @@ struct PlayerUI::Impl {
         ImGui::SetNextWindowPos(viewport->WorkPos); ImGui::SetNextWindowSize(viewport->WorkSize);
         ImGui::Begin("Visual SPC Player", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | fixedRegionFlags);
         transport();
+        const float header=ImGui::GetCursorScreenPos().y-ImGui::GetWindowPos().y;
+        headerMin=std::min(headerMin,header); headerMax=std::max(headerMax,header);
         footerText = {};
         if (panel == 0) {
             footerText.inspection = "Scroll to zoom · drag to pan · hover to inspect";
@@ -560,17 +791,22 @@ struct PlayerUI::Impl {
         }
         const bool layoutChanged = drawWorkspace(sidebar, [&] {
             FlowToolbar tabs;
-            for (int i = 0; i < 6; ++i) {
-                const auto label = std::array{"ARAM", "Voices", "DSP", "Track", "Settings", "About"}[i];
+            for (int i = 0; i < 7; ++i) {
+                const auto label = std::array{"ARAM", "Voices", "DSP", "Spectrogram", "Track", "Settings", "About"}[i];
                 const float width = std::max(70 * ImGui::GetStyle().FontScaleDpi, FlowToolbar::buttonWidth(label));
                 tabs.next(width);
-                if (ImGui::Selectable(label, panel == i, 0, ImVec2(width, 0))) panel = i;
+                if (ImGui::Selectable(label, panel == i, 0, ImVec2(width, 0))) {
+                    panel = i;
+                    if(panel!=3) maintainGraphics();
+                    if (settings.spectrogram != (panel == 3)) { settings.spectrogram = panel == 3; saveSettings(); }
+                }
             }
             ImGui::Separator();
-            ImGui::BeginChild("Panel content", ImVec2(0, 0), 0, panel == 0 ? fixedRegionFlags : 0);
+            ImGui::BeginChild("Panel content", ImVec2(0, 0), 0, (panel == 0 || panel == 3) ? fixedRegionFlags : 0);
             try {
                 if (panel == 0) memoryPanel(); else if (panel == 1) voicePanel();
-                else if (panel == 2) dspPanel(); else if (panel == 3) trackPanel(); else if (panel == 4) settingsPanel();
+                else if (panel == 2) dspPanel(); else if (panel == 3) spectrogramPanel();
+                else if (panel == 4) trackPanel(); else if (panel == 5) settingsPanel();
                 else if (drawAbout()) {
                     const auto path = chooseSave(window, L"Visual-SPC-Player-source.zip", true);
                     if (!path.empty()) {
@@ -578,7 +814,7 @@ struct PlayerUI::Impl {
                         status = library.save(path, std::string(source)) ? "" : "Source ZIP could not be saved. Try again.";
                     }
                 }
-            } catch (const std::exception& error) { status = error.what(); }
+            } catch (const std::exception& error) { if(FAILED(graphics->device->GetDeviceRemovedReason())) throw; status = error.what(); }
             ImGui::EndChild();
         }, [&] {
             try { libraryPanel(); } catch (const std::exception& error) { status = error.what(); }
@@ -603,6 +839,8 @@ PlayerUI::PlayerUI(HWND window, D3DDevice& graphics) : impl_(std::make_unique<Im
 PlayerUI::~PlayerUI() = default;
 void PlayerUI::tick() { impl_->tick(); }
 void PlayerUI::draw() { impl_->draw(); }
+void PlayerUI::maintainGraphics(bool visible) { impl_->maintainGraphics(visible); impl_->recordSpectrumReport(); }
+void PlayerUI::setSmokePanel(unsigned panel) { if(impl_->smoke && panel<7) impl_->panel=static_cast<int>(panel); }
 void PlayerUI::open(const std::vector<std::filesystem::path>& paths) { impl_->open(paths); }
 void PlayerUI::graphicsReset(D3DDevice& graphics) { impl_->resetGraphics(graphics); }
 void PlayerUI::setDisplayRate(unsigned numerator, unsigned denominator) {
@@ -610,7 +848,16 @@ void PlayerUI::setDisplayRate(unsigned numerator, unsigned denominator) {
 }
 double PlayerUI::targetRate() const noexcept { return impl_->targetRate(); }
 bool PlayerUI::continuous() const noexcept {
-    return impl_->intent.playing() || (impl_->panel == 0 && impl_->settings.waterfall && impl_->waterfallRenderer->pendingCount());
+    return impl_->intent.playing() || (impl_->panel == 0 && impl_->settings.waterfall && impl_->waterfallRenderer->pendingCount()) ||
+        (impl_->panel == 3 && impl_->spectrumRenderer && impl_->spectrumRenderer->stats().pending);
 }
-void PlayerUI::setSmokeVolume() { impl_->smoke = true; impl_->settings.volume = 0; }
+void PlayerUI::setSmokeVolume(bool spectrogram,bool stress) { impl_->smoke = true; impl_->settings.volume = 0; if(spectrogram) { impl_->panel=3; impl_->settings.spectrogram=true; impl_->settings.spectrumDifference=true; impl_->settings.spectrumFft=4096; impl_->settings.spectrumHop=stress?64:256; if(stress) { impl_->settings.spectrumSampling=2; impl_->settings.spectrumSeconds=10; impl_->settings.spectrumTemporal=true; impl_->settings.spectrumTemporalMs=200; } } }
+void PlayerUI::writeSpectrumReport(const std::filesystem::path& path) {
+    const auto& s=impl_->settings;
+    std::ofstream out(path);
+    out<<nlohmann::json{{"adapter",utf8(impl_->graphics->adapterName)},{"software",impl_->graphics->software},
+        {"width",impl_->spectrumWidth},{"height",impl_->spectrumHeight},{"fft",s.spectrumFft},{"hop",s.spectrumHop},
+        {"sampling",s.spectrumSampling},{"temporalMs",s.spectrumTemporalMs},{"targetHz",impl_->targetRate()},
+        {"headerMin",impl_->headerMin},{"headerMax",impl_->headerMax},{"samples",impl_->spectrumReport}}.dump(2);
+}
 }

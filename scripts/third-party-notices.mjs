@@ -9,7 +9,8 @@ export const bundledNotices = async (root = projectRoot) => {
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
     .sort();
-  const files = ['NOTICE.md', 'LICENSE', ...licenseFiles.map((name) => 'LICENSES/' + name)];
+  const files = ['NOTICE.md', 'LICENSE', ...licenseFiles.map((name) => 'LICENSES/' + name),
+    'native/vendor/kissfft/COPYING','native/vendor/kissfft/BSD-3-Clause'];
   const parts = [];
   for (const file of files) {
     parts.push(`===== ${file} =====\n\n${(await readFile(join(root, file), 'utf8')).trimEnd()}\n`);

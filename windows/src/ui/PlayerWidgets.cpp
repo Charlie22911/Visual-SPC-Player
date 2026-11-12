@@ -124,15 +124,9 @@ bool playbackButton(const char* id, PlaybackSymbol symbol, const char* tooltip) 
 TransportActions drawTransport(const std::string& title, const std::string& game,
     const std::string& status, unsigned seconds, bool playing, bool loaded, float& volume) {
     const float ratio = ImGui::GetFontSize() / 16;
-    FlowToolbar heading;
-    heading.next(ImGui::CalcTextSize("Visual SPC Player").x);
-    ImGui::TextColored(ImVec4(0.55f, 1, 0.88f, 1), "Visual SPC Player");
-    heading.next(140 * ratio);
-    textSlot(title + (game.empty() ? "" : "   " + game), ImGui::GetContentRegionAvail().x, ImGui::GetColorU32(ImGuiCol_Text));
     FlowToolbar row;
     char elapsed[32]; std::snprintf(elapsed, sizeof(elapsed), "%02u:%02u", seconds / 60, seconds % 60);
     const float timeWidth = std::max(ImGui::CalcTextSize("0000:00").x, ImGui::CalcTextSize(elapsed).x);
-    row.next(timeWidth); textSlot(elapsed, timeWidth, ImGui::GetColorU32(ImGuiCol_Text), true);
     TransportActions actions;
     row.next(ImGui::GetFrameHeight());
     actions.playPause = playbackButton("##PlayPause", playing ? PlaybackSymbol::Pause : PlaybackSymbol::Play, playing ? "Pause (Space)" : "Play (Space)");
@@ -147,10 +141,13 @@ TransportActions drawTransport(const std::string& title, const std::string& game
     actions.volumeChanged = ImGui::SliderFloat("##Volume", &volume, 0, 1, "%.2f");
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Volume: %.0f%%", volume * 100);
     ImGui::EndGroup();
-    if (!status.empty()) {
-        row.next(120 * ratio);
-        textSlot(status, ImGui::GetContentRegionAvail().x, ImGui::GetColorU32(ImGuiCol_TextDisabled), true);
-    }
+    row.next(timeWidth); textSlot(elapsed, timeWidth, ImGui::GetColorU32(ImGuiCol_Text), true);
+    row.next(140 * ratio);
+    const auto nowPlaying = title + (game.empty() ? "" : "   " + game);
+    // Transient loading/error text shares the existing metadata slot. Adding a
+    // conditional row here shifts every tab and canvas for a frame or two.
+    textSlot(status.empty() ? nowPlaying : status + "   " + nowPlaying,
+        ImGui::GetContentRegionAvail().x, ImGui::GetColorU32(ImGuiCol_Text), true);
     ImGui::Separator();
     return actions;
 }

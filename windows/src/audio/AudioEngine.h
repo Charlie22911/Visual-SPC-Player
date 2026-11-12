@@ -1,5 +1,6 @@
 #pragma once
 #include "model/Capture.h"
+#include "SpectrumTap.h"
 #include <memory>
 namespace visual_spc {
 struct ClockAnchor {
@@ -26,6 +27,7 @@ public:
     bool popRetired(spc_native_instance*& instance);
     bool popAnchor(ClockAnchor& anchor);
     CaptureQueue& captures() noexcept;
+    SpectrumQueue& spectrum() noexcept;
     unsigned sampleRate() const noexcept;
     long lastError() const noexcept;
 };

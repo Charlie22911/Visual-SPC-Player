@@ -116,6 +116,19 @@
       ],
       "licensePath": "windows/vendor/json/LICENSE.MIT",
       "localModifications": "Unmodified single-header distribution."
+    },
+    {
+      "name": "KISS FFT",
+      "version": "131.1.0",
+      "source": "https://github.com/mborgerding/kissfft",
+      "baseRevision": "8f47a67f595a6641c566087bf5277034be64f24d",
+      "copyright": "Copyright (c) 2003-2010 Mark Borgerding",
+      "license": "BSD-3-Clause",
+      "localPaths": [
+        "native/vendor/kissfft"
+      ],
+      "licensePath": "native/vendor/kissfft/BSD-3-Clause",
+      "localModifications": "Unmodified real and complex FFT sources, used by native and WebAssembly spectrogram analysis."
     }
   ]
 }

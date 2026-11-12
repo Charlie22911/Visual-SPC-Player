@@ -26,6 +26,9 @@ import {
 } from './library/storage';
 import { DspPanel } from './player/DspPanel';
 import { VoicesPanel } from './player/VoicesPanel';
+import { AboutPanel } from './player/AboutPanel';
+import { loadLibraryLayout, saveLibraryLayout } from './player/LibraryLayout';
+import { SpectrogramPanel } from './spectrum/SpectrogramPanel';
 import { registerSpcWebTools, type WebModelContext } from './webmcp';
 import { VisualDiagnostics } from './audio/VisualDiagnostics';
 import { ByteRefreshDiagnostics } from './audio/ByteRefreshDiagnostics';
@@ -40,10 +43,10 @@ import {
   serializeSettingsFile,
   type AppSettings,
 } from './settings';
-import { getStandaloneAssets, isStandaloneBuild, standaloneTextUrl } from './standalone';
+import { getStandaloneAssets, isStandaloneBuild } from './standalone';
 import './app.css';
 
-type Tab = 'aram' | 'voices' | 'dsp' | 'track' | 'settings';
+type Tab = 'aram' | 'voices' | 'dsp' | 'spectrogram' | 'track' | 'settings' | 'about';
 type ActiveLibrarySource =
   | { kind: 'directory'; name: string; handle: FileSystemDirectoryHandleLike }
   | { kind: 'files'; name: string; descriptors: LibraryFileDescriptor[] };
@@ -91,6 +94,13 @@ export default function App() {
   const [entropyUnit, setEntropyUnit] = useState(initialSettings.settings.entropyUnit);
   const [geometry, setGeometry] = useState(initialSettings.settings.geometry);
   const [waterfallSeconds, setWaterfallSeconds] = useState(initialSettings.settings.waterfallSeconds);
+  const [mapSampling, setMapSampling] = useState(initialSettings.settings.mapSampling);
+  const [waterfallSampling, setWaterfallSampling] = useState(initialSettings.settings.waterfallSampling);
+  const [waterfallTemporal, setWaterfallTemporal] = useState(initialSettings.settings.waterfallTemporal);
+  const [waterfallTemporalMs, setWaterfallTemporalMs] = useState(initialSettings.settings.waterfallTemporalMs);
+  const [spectrum, setSpectrum] = useState(initialSettings.settings.spectrum);
+  const [libraryLayout, setLibraryLayout] = useState(loadLibraryLayout);
+  const [footerTarget, setFooterTarget] = useState<HTMLDivElement | null>(null);
   const [hz, setHz] = useState(initialSettings.settings.visualizerRate);
   const [detectedDisplayHz, setDetectedDisplayHz] = useState<number | null>(null);
   const [activityPersistence, setActivityPersistence] = useState(initialSettings.settings.activityPersistence);
@@ -128,8 +138,17 @@ export default function App() {
   const [droppedSnapshots, setDroppedSnapshots] = useState(0);
   const effectiveHz = hz === 'display' ? detectedDisplayHz ?? 60 : hz;
   const standaloneAssets = getStandaloneAssets();
-  const noticesHref = standaloneAssets ? standaloneTextUrl(standaloneAssets.noticesBase64) : './NOTICE.txt';
-  const sourceHref = standaloneAssets ? standaloneTextUrl(standaloneAssets.sourceBase64) : './spc-core-source.txt';
+  useEffect(() => saveLibraryLayout(libraryLayout), [libraryLayout]);
+  useEffect(() => {
+    if (!footerTarget) return;
+    const refreshTitles = () => footerTarget.querySelectorAll<HTMLElement>('.legend, .visual-status > span, .map-metric-inspector, .waterfall-inspector').forEach(node => {
+      node.title = node.textContent ?? '';
+    });
+    const observer = new MutationObserver(refreshTitles);
+    observer.observe(footerTarget, { childList: true, characterData: true, subtree: true });
+    refreshTitles();
+    return () => observer.disconnect();
+  }, [footerTarget]);
 
   webState.current = {
     loaded,
@@ -138,6 +157,18 @@ export default function App() {
     aramMode: mode,
     activityUnit, dataUnit, dataXor, entropyUnit,
   };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.target instanceof Element && event.target.closest('input, textarea, select, button, [contenteditable="true"]')) return;
+      if (!webState.current.loaded) return;
+      event.preventDefault();
+      engine.setPaused(webState.current.playing);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [engine]);
 
   useEffect(() => {
     const context = (document as Document & { modelContext?: WebModelContext }).modelContext;
@@ -379,6 +410,7 @@ export default function App() {
     activityUnit, dataUnit, dataXor, entropyUnit,
     geometry,
     waterfallSeconds,
+    mapSampling, waterfallSampling, waterfallTemporal, waterfallTemporalMs, spectrum,
     visualizerRate: hz,
     palette,
     activityPersistence,
@@ -416,6 +448,11 @@ export default function App() {
       setDataUnit(imported.dataUnit); setDataXor(imported.dataXor); setEntropyUnit(imported.entropyUnit);
       setGeometry(imported.geometry);
       setWaterfallSeconds(imported.waterfallSeconds);
+      setMapSampling(imported.mapSampling);
+      setWaterfallSampling(imported.waterfallSampling);
+      setWaterfallTemporal(imported.waterfallTemporal);
+      setWaterfallTemporalMs(imported.waterfallTemporalMs);
+      setSpectrum(imported.spectrum);
       setHz(imported.visualizerRate);
       setPalette(imported.palette);
       setActivityPersistence(imported.activityPersistence);
@@ -512,7 +549,6 @@ export default function App() {
       setLoaded(true);
       setPlaying(true);
       setAudibleFrame(0);
-      setTab('aram');
     } catch (caught) {
       if (engine.isCurrentLoad(loadId)) {
         retryEntry.current = entry;
@@ -546,32 +582,24 @@ export default function App() {
     ['aram', 'ARAM'],
     ['voices', 'Voices'],
     ['dsp', 'DSP'],
+    ['spectrogram', 'Spectrogram'],
     ['track', 'Track'],
     ['settings', 'Settings'],
+    ['about', 'About'],
   ];
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /></span>
-          <div><strong>Visual SPC Player</strong><span>SPC700 / S-DSP player</span></div>
-        </div>
-        <div className="now-playing">
-          <span className="eyebrow">{loading ? 'Loading' : engineStatus === 'failed' ? 'Audio failed' : engineStatus === 'interrupted' ? 'Audio interrupted' : loaded ? (playing ? 'Playing' : 'Paused') : 'Ready'}</span>
-          <strong>{loading ? pendingTitle : metadata?.title || 'Choose an SPC file'}</strong>
-          <span>{metadata?.game || libraryName}</span>
-        </div>
         <div className="transport">
-          <time>{formatTime(audibleFrame)}</time>
-          <button onClick={() => {
+          <button className="symbol-button" aria-label={playing ? 'Pause' : 'Play'} title={playing ? 'Pause (Space)' : 'Play (Space)'} onClick={() => {
             if (!loaded) {
               openFileInput();
               return;
             }
             engine.setPaused(playing);
-          }}>{playing ? 'Pause' : 'Play'}</button>
-          <button onClick={() => {
+          }}><svg viewBox="0 0 24 24" aria-hidden="true">{playing ? <path d="M6 4h4v16H6zm8 0h4v16h-4z" /> : <path d="m7 4 14 8L7 20z" />}</svg></button>
+          <button className="symbol-button" aria-label="Restart" title="Restart" onClick={() => {
             if (!loaded) return;
             void engine.restart().then((generation) => {
               expectedGeneration.current = generation;
@@ -583,8 +611,8 @@ export default function App() {
               lastUiUpdate.current = 0;
               expectedRequest.current = engine.setView('activity', hz === 'display' ? 60 : hz, hz === 'display');
             }).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
-          }} disabled={!loaded}>Restart</button>
-          <label className="volume">Volume
+          }} disabled={!loaded}><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2" d="M5 8a8 8 0 1 1-1 7M5 3v6h6" /></svg></button>
+          <label className="volume" title={`Volume: ${Math.round(volume * 100)}%`}><span className="sr-only">Volume</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h4l5-5v16l-5-5H3z" /><path fill="none" stroke="currentColor" strokeWidth="1.7" d={volume > 0 ? 'M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14' : 'm16 9 6 6m0-6-6 6'} /></svg>
             <input
               type="range"
               min="0"
@@ -598,6 +626,12 @@ export default function App() {
               }}
             />
           </label>
+          <time>{formatTime(audibleFrame)}</time>
+        </div>
+        <div className="now-playing" title={[loading ? 'Loading…' : '', loading ? pendingTitle : metadata?.title, metadata?.game].filter(Boolean).join(' · ')}>
+          <span className="eyebrow">{loading ? 'Loading' : engineStatus === 'failed' ? 'Audio failed' : engineStatus === 'interrupted' ? 'Audio interrupted' : loaded ? (playing ? 'Playing' : 'Paused') : 'Ready'}</span>
+          <strong>{loading ? pendingTitle || 'Loading SPC file…' : metadata?.title || 'Choose an SPC file'}</strong>
+          <span>{metadata?.game || libraryName}</span>
         </div>
       </header>
 
@@ -613,11 +647,11 @@ export default function App() {
         )}
       </div>
 
-      <div className="workspace">
-        <aside className="library-panel">
+      <div className={`workspace${libraryLayout.open ? ' library-open' : ''}${libraryLayout.pinned ? ' library-pinned' : ''}`}>
+        <aside className="library-panel" id="player-library" hidden={!libraryLayout.open}>
           <div className="library-heading">
             <div><span className="eyebrow">Local files</span><h1>Library</h1></div>
-            <span className="track-count">{entries.length}</span>
+            <div className="library-heading-actions"><span className="track-count">{entries.length}</span><button className="library-pin symbol-button" aria-label={libraryLayout.pinned ? 'Unpin library' : 'Pin library'} title={libraryLayout.pinned ? 'Let library float' : 'Reserve space for library'} aria-pressed={libraryLayout.pinned} onClick={() => setLibraryLayout(value => ({ ...value, pinned: !value.pinned }))}><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.6" d="m9 3 10 10-4 1-4 4-1-5-5-1 4-4zM10 14l-7 7" /></svg></button></div>
           </div>
           <div className="library-actions">
             <button className="primary" onClick={() => void openFolder()}>Open folder</button>
@@ -735,6 +769,7 @@ export default function App() {
             )}
           </div>
         </aside>
+        <button className="library-toggle" aria-controls="player-library" aria-expanded={libraryLayout.open} aria-label={libraryLayout.open ? 'Collapse library' : 'Expand library'} title={libraryLayout.open ? 'Collapse library' : 'Expand library'} onClick={() => setLibraryLayout(value => ({ ...value, open: !value.open }))}><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.6" d="M3 7h7l2 2h9v11H3zM3 7V4h7l2 3" /></svg><span aria-hidden="true">{libraryLayout.open ? '‹' : '›'}</span></button>
 
         <main className="main-panel">
           <nav className="view-tabs" aria-label="Player views">
@@ -742,10 +777,12 @@ export default function App() {
               <button key={value} onClick={() => setTab(value)} className={tab === value ? 'active' : ''} aria-pressed={tab === value}>{label}</button>
             ))}
           </nav>
-          <div className={`view-content${tab === 'aram' ? ' aram-view-content' : ''}`}>
-            {tab === 'aram' && <AramPanel activityUnit={activityUnit} onActivityUnitChange={(next) => { setActivityUnit(next); setSettingsSaveStatus(''); }} mode={mode} onModeChange={(next) => { setMode(next); setSettingsSaveStatus(''); }} dataUnit={dataUnit} dataXor={dataXor} entropyUnit={entropyUnit} onDataUnitChange={(next) => { setDataUnit(next); setSettingsSaveStatus(''); }} onDataXorChange={(next) => { setDataXor(next); setSettingsSaveStatus(''); }} onEntropyUnitChange={(next) => { setEntropyUnit(next); setSettingsSaveStatus(''); }} geometry={geometry} onGeometryChange={(next) => { setGeometry(next); setSettingsSaveStatus(''); }} waterfallSeconds={waterfallSeconds} onWaterfallSecondsChange={(next) => { setWaterfallSeconds(next); setSettingsSaveStatus(''); }} activityByteBackground={activityByteBackground} onActivityByteBackgroundChange={(next) => { setActivityByteBackground(next); setSettingsSaveStatus(''); }} history={memoryHistory} playing={playing} snapshot={snapshot} stream={visualStream} generation={expectedGeneration.current} palette={palette} activityPersistence={activityPersistence} activityPersistenceMilliseconds={activityPersistenceMilliseconds} refreshRate={hz} displayHz={detectedDisplayHz} />}
+          <div className={`view-content${tab === 'aram' || tab === 'spectrogram' ? ' aram-view-content' : ''}`}>
+            {tab === 'aram' && <AramPanel footerTarget={footerTarget} mapSampling={mapSampling} onMapSamplingChange={next => { setMapSampling(next); setSettingsSaveStatus(''); }} waterfallSampling={waterfallSampling} onWaterfallSamplingChange={next => { setWaterfallSampling(next); setSettingsSaveStatus(''); }} waterfallTemporal={waterfallTemporal} onWaterfallTemporalChange={next => { setWaterfallTemporal(next); setSettingsSaveStatus(''); }} waterfallTemporalMs={waterfallTemporalMs} onWaterfallTemporalMsChange={next => { setWaterfallTemporalMs(next); setSettingsSaveStatus(''); }} activityUnit={activityUnit} onActivityUnitChange={(next) => { setActivityUnit(next); setSettingsSaveStatus(''); }} mode={mode} onModeChange={(next) => { setMode(next); setSettingsSaveStatus(''); }} dataUnit={dataUnit} dataXor={dataXor} entropyUnit={entropyUnit} onDataUnitChange={(next) => { setDataUnit(next); setSettingsSaveStatus(''); }} onDataXorChange={(next) => { setDataXor(next); setSettingsSaveStatus(''); }} onEntropyUnitChange={(next) => { setEntropyUnit(next); setSettingsSaveStatus(''); }} geometry={geometry} onGeometryChange={(next) => { setGeometry(next); setSettingsSaveStatus(''); }} waterfallSeconds={waterfallSeconds} onWaterfallSecondsChange={(next) => { setWaterfallSeconds(next); setSettingsSaveStatus(''); }} activityByteBackground={activityByteBackground} onActivityByteBackgroundChange={(next) => { setActivityByteBackground(next); setSettingsSaveStatus(''); }} history={memoryHistory} playing={playing} snapshot={snapshot} stream={visualStream} generation={expectedGeneration.current} palette={palette} activityPersistence={activityPersistence} activityPersistenceMilliseconds={activityPersistenceMilliseconds} refreshRate={hz} displayHz={detectedDisplayHz} />}
             {tab === 'voices' && <VoicesPanel stream={visualStream} generation={expectedGeneration.current} onError={setError} />}
             {tab === 'dsp' && <DspPanel stream={visualStream} generation={expectedGeneration.current} onError={setError} />}
+            {tab === 'spectrogram' && <SpectrogramPanel engine={engine} settings={spectrum} onSettingsChange={next => { setSpectrum(next); setSettingsSaveStatus(''); }} refreshRate={hz} displayHz={detectedDisplayHz} footerTarget={footerTarget} />}
+            {tab === 'about' && <AboutPanel />}
             {tab === 'track' && (
               <section className="detail-panel track-detail">
                 <div className="section-heading"><div><span className="eyebrow">ID666</span><h2>Track information</h2></div></div>
@@ -842,12 +879,20 @@ export default function App() {
                 {!standaloneAssets && updateAvailable && <button className="primary" onClick={() => window.dispatchEvent(new CustomEvent('spc-activate-update'))}>Update and reload</button>}
                 {standaloneAssets && <p className="technical-note">To update this standalone copy, replace this HTML file with a newer build.</p>}
                 <p className="technical-note">The final 64 bytes may show the emulator-visible IPL ROM overlay. The display is a copied memory image and does not alter emulation.</p>
-                <p className="technical-note"><a href={noticesHref} target="_blank" rel="noreferrer">Licenses and notices</a> · <a href={sourceHref} target="_blank" rel="noreferrer">Bundled emulator source</a></p>
+                <p className="technical-note">Usage, credits, license texts and the complete source archive are available in About.</p>
               </section>
             )}
           </div>
         </main>
       </div>
+      <footer className="app-footer">
+        <div id="visual-footer-detail" ref={setFooterTarget} className="footer-detail">
+          {tab !== 'aram' && tab !== 'spectrogram' && <span className="footer-inspection" title="Local SPC700 / S-DSP state">SPC700 / S-DSP</span>}
+        </div>
+        <div className="footer-summary" title={`${loaded ? playing ? 'Playing' : 'Paused' : 'Ready'} · ${effectiveHz} Hz target · ${detectedDisplayHz ?? 'Measuring'} Hz display · ${droppedSnapshots} snapshot buffer drops`}>
+          <span className={playing ? 'live-status' : ''}>{loaded ? playing ? 'Playing' : 'Paused' : 'Ready'}</span><span>{hz === 'display' ? 'Display' : effectiveHz + ' Hz'}{detectedDisplayHz ? ` · ${detectedDisplayHz} Hz display` : ''}</span>
+        </div>
+      </footer>
       {byteRefreshMonitor && <ByteRefreshDiagnostics monitor={byteRefreshMonitor} mode={renderingMode({ mode, activityUnit, dataUnit, dataXor, entropyUnit })} geometry={geometry} target={hz} buildId={standaloneAssets?.buildId} hidden={tab !== 'aram'} />}
     </div>
   );

@@ -117,16 +117,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         visual_spc::PlayerUI ui(window, *graphics); player = &ui;
         DragAcceptFiles(window, TRUE);
         int argc = 0; auto** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-        unsigned smokeSeconds = 0;
+        unsigned smokeSeconds = 0; bool smokeSpectrum = false,smokeStress=false,smokeLifecycle=false;
+        std::filesystem::path spectrumReport;
         std::vector<std::filesystem::path> paths;
         if (argv) {
             for (int i = 1; i < argc; ++i) {
                 if (std::wstring(argv[i]) == L"--smoke-seconds" && i + 1 < argc) smokeSeconds = static_cast<unsigned>(_wtoi(argv[++i]));
+                else if (std::wstring(argv[i]) == L"--smoke-spectrogram" && i + 1 < argc) { smokeSpectrum=true; smokeSeconds=static_cast<unsigned>(_wtoi(argv[++i])); }
+                else if (std::wstring(argv[i]) == L"--smoke-spectrum-lifecycle" && i+1<argc) { smokeSpectrum=true; smokeLifecycle=true; smokeSeconds=static_cast<unsigned>(_wtoi(argv[++i])); }
+                else if (std::wstring(argv[i]) == L"--spectrum-stress") smokeStress=true;
+                else if (std::wstring(argv[i]) == L"--spectrum-report" && i+1<argc) spectrumReport=argv[++i];
                 else paths.emplace_back(argv[i]);
             }
             LocalFree(argv);
         }
-        if (smokeSeconds) ui.setSmokeVolume();
+        if (smokeSeconds) ui.setSmokeVolume(smokeSpectrum,smokeStress);
         if (!paths.empty()) ui.open(paths);
         ShowWindow(window, show); UpdateWindow(window);
         LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
@@ -137,7 +142,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         if (!timer) throw std::runtime_error("Frame pacing timer is unavailable");
         const auto began = std::chrono::steady_clock::now();
         auto refreshAt = began - std::chrono::seconds(2);
-        bool quit = false;
+        bool quit = false; unsigned lifecyclePhase=0;
         while (!quit) {
             MSG message{};
             bool messages = false;
@@ -149,11 +154,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             if (quit) break;
             ui.tick();
             const auto now = std::chrono::steady_clock::now();
-            if (smokeSeconds && now - began >= std::chrono::seconds(smokeSeconds)) { DestroyWindow(window); continue; }
+            if (smokeSeconds && now - began >= std::chrono::seconds(smokeSeconds)) { if(!spectrumReport.empty()) ui.writeSpectrumReport(spectrumReport); DestroyWindow(window); continue; }
+            if(smokeLifecycle && smokeSeconds) {
+                const auto elapsed=std::chrono::duration<double>(now-began).count();
+                const unsigned phase=std::min(4u,static_cast<unsigned>(elapsed*5/smokeSeconds));
+                if(phase!=lifecyclePhase) {
+                    lifecyclePhase=phase; ui.setSmokePanel(phase%2==0?3:phase==1?0:4);
+                    if(phase==3 && !paths.empty()) ui.open(paths);
+                }
+            }
             if (now - refreshAt > std::chrono::seconds(1)) { const auto refresh = refreshRate(window); ui.setDisplayRate(refresh.first, refresh.second); refreshAt = now; }
             if (dpiChanged) { theme(GetDpiForWindow(window) / 96.0f); dpiChanged = false; }
             try {
                 if (resizeWidth && resizeHeight) { graphics->resize(resizeWidth, resizeHeight); resizeWidth = resizeHeight = 0; }
+                ui.maintainGraphics(!minimized);
                 if (minimized) { MsgWaitForMultipleObjectsEx(0, nullptr, 33, QS_ALLINPUT, MWMO_INPUTAVAILABLE); continue; }
                 LARGE_INTEGER ticks{}; QueryPerformanceCounter(&ticks);
                 const double selected = visual_spc::effectiveDrawRate(ui.targetRate(), ui.continuous());

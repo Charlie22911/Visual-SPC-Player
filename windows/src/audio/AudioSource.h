@@ -1,6 +1,7 @@
 #pragma once
 #include "Resampler.h"
 #include "PlaybackTimeline.h"
+#include "SpectrumTap.h"
 #include "model/Capture.h"
 #include <array>
 namespace visual_spc {
@@ -9,6 +10,8 @@ namespace visual_spc {
 class AudioSource {
     spc_native_instance* active_ = nullptr;
     CaptureQueue& captures_;
+    SpectrumQueue* spectrum_;
+    uint32_t spectrumDiscontinuity_ = 0;
     Resampler resampler_;
     CaptureCadence cadence_{240, 1};
     std::array<int16_t, 1024> scratch_{};
@@ -22,7 +25,7 @@ class AudioSource {
     bool capture() noexcept;
     bool feed(std::size_t frames) noexcept;
 public:
-    AudioSource(unsigned outputRate, CaptureQueue& captures);
+    AudioSource(unsigned outputRate, CaptureQueue& captures, SpectrumQueue* spectrum = nullptr);
     spc_native_instance* replace(spc_native_instance*, uint32_t generation) noexcept;
     bool setCaptureRate(uint32_t numerator, uint32_t denominator) noexcept;
     void setPlaying(bool playing) noexcept;

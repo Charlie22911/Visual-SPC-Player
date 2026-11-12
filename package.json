@@ -1,6 +1,6 @@
 {
   "name": "visual-spc-player",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local SPC audio player and live SPC700 memory visualizer",
   "license": "MIT",
   "engines": { "node": ">=24" },

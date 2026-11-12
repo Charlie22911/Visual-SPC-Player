@@ -1,17 +1,18 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Snapshot } from '../audio/protocol';
 import type { VisualStream } from '../audio/visualStream';
 import type { MemoryHistory } from './history';
 import { formatAddress } from './mapping';
 import type { PalettePreset } from './palettes';
-import { isActivityMode, isBitMode, isEntropyMode, isXorMode, type AramMode, type WaterfallSeconds } from './types';
+import { isActivityMode, isBitMode, isEntropyMode, isXorMode, type AramMode, type WaterfallSeconds, type MemorySampling } from './types';
 import type { DrawStats, MemoryViewHandle } from './viewTypes';
 import { WaterfallRenderer } from './waterfallRenderer';
 import { columnRange, fitWindow, oneToOneWindow, panWindow, plotColumns, resizeWindow, zoomWindow, type AddressWindow } from './waterfallViewport';
 
 export type WaterfallInfo = { columns: number; window: AddressWindow; retainedSeconds: number; cacheBytes: number; payloadBytes: number; error: string };
-type Props = { active: boolean; mode: AramMode; activityByteBackground: boolean; seconds: WaterfallSeconds; palette: PalettePreset; stream: VisualStream; generation: number; history: MemoryHistory; displayHz: number | null; onStats(stats: DrawStats): void; onInfo(info: WaterfallInfo): void };
-export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function WaterfallView({ active, mode, activityByteBackground, seconds, palette, stream, generation, history, displayHz, onStats, onInfo }, ref) {
+type Props = { active: boolean; mode: AramMode; activityByteBackground: boolean; seconds: WaterfallSeconds; palette: PalettePreset; stream: VisualStream; generation: number; history: MemoryHistory; displayHz: number | null; onStats(stats: DrawStats): void; onInfo(info: WaterfallInfo): void; waterfallSampling?: MemorySampling; waterfallTemporal?: boolean; waterfallTemporalMs?: number; inspectorTarget?: HTMLElement | null };
+export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function WaterfallView({ active, mode, activityByteBackground, seconds, palette, stream, generation, history, displayHz, onStats, onInfo, waterfallSampling = 'nearest', waterfallTemporal = false, waterfallTemporalMs = 50, inspectorTarget }, ref) {
   const plot = useRef<HTMLDivElement>(null), canvas = useRef<HTMLCanvasElement>(null);
   const backing = useRef<HTMLCanvasElement | null>(null), renderer = useRef<WaterfallRenderer | null>(null);
   const job = useRef(0), inspector = useRef<HTMLDivElement>(null), crosshair = useRef<HTMLDivElement>(null), empty = useRef<HTMLDivElement>(null);
@@ -23,8 +24,9 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
   const stats = useRef({ count: 0, total: 0, max: 0, since: performance.now() });
   const oldColumns = useRef(0);
   const pixelsPerBucket = isBitMode(mode) ? 8 : 1;
-  const columns = plotColumns(size.width / pixelsPerBucket), width = columns * pixelsPerBucket;
-  const height = Math.max(1, Math.floor(size.height));
+  const dpr = Math.max(1, globalThis.devicePixelRatio || 1);
+  const columns = plotColumns(size.width * dpr / pixelsPerBucket), width = columns * pixelsPerBucket / dpr;
+  const height = Math.max(1, Math.floor(size.height * dpr));
   const updateInfo = () => {
     let oldestFrame: number | null = null;
     for (const record of history.records()) { oldestFrame = record.intervalStartFrame ?? record.audibleFrame; break; }
@@ -43,7 +45,7 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
     const measure = () => {
       if (!element.clientWidth || !element.clientHeight) return;
       const width = plotColumns(element.clientWidth);
-      const nextColumns = plotColumns(width / pixelsPerBucket);
+      const nextColumns = plotColumns(width * dpr / pixelsPerBucket);
       const previousColumns = oldColumns.current;
       setSize({ width, height: Math.floor(element.clientHeight) });
       setWindow(current => fit ? fitWindow() : previousColumns ? resizeWindow(current, previousColumns, nextColumns) : current);
@@ -51,7 +53,7 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
     };
     measure(); const observer = new ResizeObserver(measure); observer.observe(element);
     return () => observer.disconnect();
-  }, [active, fit, pixelsPerBucket]);
+  }, [active, fit, pixelsPerBucket, dpr]);
   useImperativeHandle(ref, () => ({
     zoom: factor => { setFit(false); setWindow(current => zoomWindow(current, columns, factor, 0.5)); },
     fit: () => { setFit(true); setWindow(fitWindow()); },
@@ -61,14 +63,14 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
     // A resize or mode change can increase the bucket count before its window
     // adjustment commits. Wait for that adjustment instead of drawing empty buckets.
     if (!active || !canvas.current || !size.width || !size.height || window.span < columns) return;
-    if (!backing.current) { backing.current = document.createElement('canvas'); renderer.current = new WaterfallRenderer(backing.current, history); }
+    if (!backing.current) { renderer.current = new WaterfallRenderer(document.createElement('canvas'), history, true); backing.current = renderer.current.canvas; }
     const view = renderer.current!, destination = canvas.current;
     const context = destination.getContext('2d'); if (!context) return;
-    const dpr = Math.max(1, globalThis.devicePixelRatio || 1);
-    destination.width = Math.round(width * dpr); destination.height = Math.round(height * dpr);
-    destination.style.width = `${width}px`; destination.style.height = `${height}px`;
-    context.setTransform(dpr, 0, 0, dpr, 0, 0); context.imageSmoothingEnabled = false;
-    view.configure({ mode, window, columns, height, framesPerBand: seconds * 32000 / height, palette, activityByteBackground: isActivityMode(mode) && activityByteBackground });
+    destination.width = Math.round(width * dpr); destination.height = height;
+    destination.style.width = `${width}px`; destination.style.height = `${height / dpr}px`;
+    destination.dataset.renderer = view.accelerated ? 'webgl2' : 'canvas2d';
+    context.setTransform(1, 0, 0, 1, 0, 0); context.imageSmoothingEnabled = false;
+    view.configure({ mode, window, columns, height, framesPerBand: seconds * 32000 / height, palette, activityByteBackground: isActivityMode(mode) && activityByteBackground, sampling: waterfallSampling, temporal: waterfallTemporal, temporalMs: waterfallTemporalMs });
     selected.current = null; if (crosshair.current) crosshair.current.hidden = true;
     if (inspector.current) inspector.current.textContent = 'Hover or tap to inspect an address and time interval';
     const budget = Math.min(4, 500 / (displayHz ?? 60));
@@ -78,10 +80,10 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       if (choice.recordId !== null && !history.get(choice.recordId)) { selected.current = null; crosshair.current.hidden = true; inspector.current.textContent = 'The selected sample is no longer retained'; return; }
       const y = view.currentBand - choice.band;
       crosshair.current.hidden = y < 0 || y >= height;
-      crosshair.current.style.left = `${choice.pixel}px`; crosshair.current.style.top = `${y}px`;
+      crosshair.current.style.left = `${choice.pixel / dpr}px`; crosshair.current.style.top = `${y / dpr}px`;
       // A partial band's latest values, activity union, or XOR peak can change
       // without pointer movement. Keep the reading tied to its current pixels.
-      if (!crosshair.current.hidden) inspect({ x: choice.pixel, y });
+      if (!crosshair.current.hidden) inspect({ x: choice.pixel / dpr, y: y / dpr });
     };
     const blit = () => { context.drawImage(backing.current!, 0, 0); showSelection(); if (empty.current) empty.current.hidden = history.latest() !== null; };
     const backfill = () => { job.current = 0; view.flush(budget); blit(); if (view.pendingCount) job.current = requestAnimationFrame(backfill); };
@@ -100,11 +102,12 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       stats.current = { count: 0, total: 0, max: 0, since: now }; updateInfo();
     }, 1000);
     return () => { off(); clearInterval(timer); if (job.current) cancelAnimationFrame(job.current); job.current = 0; };
-  }, [active, mode, activityByteBackground, seconds, palette, stream, generation, history, columns, width, height, size.width, size.height, window, displayHz, onStats, onInfo]);
+  }, [active, mode, activityByteBackground, seconds, palette, stream, generation, history, columns, width, height, size.width, size.height, window, displayHz, onStats, onInfo, dpr, waterfallSampling, waterfallTemporal, waterfallTemporalMs]);
+  useEffect(() => () => renderer.current?.dispose(), []);
   const localPoint = (event: React.PointerEvent<HTMLDivElement>) => { const rect = event.currentTarget.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; };
   const inspect = (point: { x: number; y: number }) => {
     const view = renderer.current; if (!view || !inspector.current || !crosshair.current || !view.config) return;
-    const x = Math.max(0, Math.min(width - 1, Math.floor(point.x))), y = Math.max(0, Math.min(height - 1, Math.floor(point.y)));
+    const x = Math.max(0, Math.min(columns * pixelsPerBucket - 1, Math.floor(point.x * dpr))), y = Math.max(0, Math.min(height - 1, Math.floor(point.y * dpr)));
     const result = view.inspect(x, y); if (!result) return;
     const [a, b] = columnRange(window, columns, result.column);
     const address = b - a === 1 ? formatAddress(a) : `${formatAddress(a)}–${formatAddress(b - 1)} (${b - a} bytes)`;
@@ -122,7 +125,7 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       : ` · Bit ${7 - result.lane} (address access)`;
     inspector.current.textContent = `${address} · ${time} · ${value}`;
     selected.current = { pixel: x, band: result.band, recordId: result.recordId };
-    crosshair.current.hidden = false; crosshair.current.style.left = `${x}px`; crosshair.current.style.top = `${y}px`;
+    crosshair.current.hidden = false; crosshair.current.style.left = `${x / dpr}px`; crosshair.current.style.top = `${y / dpr}px`;
   };
   const finish = (event: React.PointerEvent<HTMLDivElement>, canceled = false) => {
     if (!canceled && gesture.current && !gesture.current.moved) inspect(localPoint(event));
@@ -151,6 +154,6 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       <div ref={crosshair} className="waterfall-crosshair" hidden />
       <div ref={empty} className="map-empty">Choose an SPC file to begin</div>
     </div>
-    <div ref={inspector} className="waterfall-inspector" aria-live="polite">Hover or tap to inspect an address and time interval</div>
+    {active && (() => { const detail = <div ref={inspector} className="waterfall-inspector" aria-live="polite">Hover or tap to inspect an address and time interval</div>; return inspectorTarget ? createPortal(detail, inspectorTarget) : detail; })()}
   </div>;
 });

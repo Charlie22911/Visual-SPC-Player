@@ -68,6 +68,8 @@ if (/\bimport\s*(?:\(|[`'"{*])/.test(workletSource)) {
 }
 
 const wasm = await readFile(join(distRoot, 'spc_core.wasm'));
+const spectrumWasm = await readFile(join(distRoot, 'spc_spectrum.wasm'));
+const projectSource = await readFile(join(distRoot, 'Visual-SPC-Player-source.zip'));
 const icon = await readFile(join(distRoot, 'icon.svg'));
 const notices = await readFile(join(distRoot, 'NOTICE.txt'), 'utf8');
 const sourceBundle = await readFile(join(distRoot, 'spc-core-source.txt'), 'utf8');
@@ -76,12 +78,16 @@ const buildId = createHash('sha256')
   .update(css)
   .update(workletSource)
   .update(wasm)
+  .update(spectrumWasm)
+  .update(projectSource)
   .digest('hex')
   .slice(0, 12);
 
 const standaloneAssets = escapeScript(JSON.stringify({
   workletBase64: asBase64(workletSource),
   wasmBase64: asBase64(wasm),
+  spectrumWasmBase64: asBase64(spectrumWasm),
+  projectSourceBase64: asBase64(projectSource),
   noticesBase64: asBase64(notices),
   sourceBase64: asBase64(sourceBundle),
   buildId,

@@ -16,9 +16,13 @@ The application keeps decoding, audio timing, and mutable emulator state off the
           +-> copied ARAM, activity, DSP, and voice snapshots
                          |
                          v
-                    Canvas renderer
+                  WebGL 2 / Canvas renderer
 
-The AudioWorklet is the sole owner of the active emulator. Loading prepares a staging instance and commits it after a short fade boundary, so the main thread never reads live emulator storage. Playback state is published through versioned, acknowledged messages. The worklet reuses three transferable snapshot buffers. The engine copies each accepted snapshot into UI-owned storage and immediately returns the transferable, so React never retains a buffer that the worklet can detach.
+The AudioWorklet is the sole owner of the active emulator. Loading prepares a staging instance and commits it after a short fade boundary, so the main thread never reads live emulator storage. Playback state is published through versioned, acknowledged messages. The worklet reuses a bounded pool of transferable snapshot buffers. The engine copies each accepted snapshot into UI-owned storage and immediately returns the transferable, so React never retains a buffer that the worklet can detach.
+
+When Spectrogram is active, a separate bounded PCM pool sends native 32 kHz samples through a direct MessageChannel to a dedicated FFT worker. Its fixed-memory WebAssembly module uses KISS FFT, separate left/right Hann transforms, coherent-gain calibration, mean stereo power, and `(Left - Right) / 2` power. Results use transferable credits and are borrowed only during synchronous listeners. No FFT runs in the audio callback or on the React thread. Inactive or hidden views disable the PCM tap and terminate analysis; stale activation epochs cannot restart it.
+
+The spectrogram GPU cache stores linear powers in 32-bit floating-point textures. Frequency projection and causal temporal filtering update only new or invalidated rows. Presentation follows the audio clock at the selected cadence, performs time sampling, then converts power to dBFS and colours. Ring identities, generation checks, and explicit gaps prevent interpolation across missing data or future audio. Graphics storage is bounded; the spectrum path permits up to 384 MiB including its working buffers. Canvas fallback preserves numeric filtering semantics at the device's available rendering rate.
 
 ## WebAssembly boundary
 

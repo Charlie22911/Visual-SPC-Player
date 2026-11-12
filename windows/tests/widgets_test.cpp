@@ -47,13 +47,17 @@ int main() {
             for (int frame = 0; frame < 4; ++frame) high = voices(true);
             CHECK(low == high);
             // Transport content and long track/status strings never widen the host.
+            float transportHeight = 0;
             for (int frame = 0; frame < 4; ++frame) {
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0, 0)); ImGui::SetNextWindowSize(io.DisplaySize);
                 ImGui::Begin("Transport check", nullptr, ImGuiWindowFlags_NoDecoration | visual_spc::fixedRegionFlags);
                 float volume = 0.8f;
-                visual_spc::drawTransport(std::string(600, 'W'), std::string(300, 'M'), std::string(600, 'W'), 59999, frame % 2 != 0, true, volume);
+                visual_spc::drawTransport(std::string(600, 'W'), std::string(300, 'M'), frame % 2 ? std::string(600, 'W') : "", 59999, frame % 2 != 0, true, volume);
                 const auto* host = ImGui::GetCurrentWindow();
+                const float height = ImGui::GetCursorScreenPos().y - host->Pos.y;
+                if (transportHeight) CHECK(height == transportHeight);
+                transportHeight = height;
                 CHECK(host->DC.CursorMaxPos.x <= host->Pos.x + host->Size.x - host->WindowPadding.x + 1);
                 CHECK(host->DC.CursorMaxPos.y <= host->Pos.y + host->Size.y - host->WindowPadding.y);
                 if (frame == 3) CHECK(ImGui::GetScrollMaxX() == 0 && ImGui::GetScrollMaxY() == 0);

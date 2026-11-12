@@ -1,0 +1,6 @@
+KISS FFT 131.1.0
+Upstream: https://github.com/mborgerding/kissfft
+Revision: 8f47a67f595a6641c566087bf5277034be64f24d
+Vendored C real and complex FFT implementation, unmodified.
+License: BSD-3-Clause (see COPYING and BSD-3-Clause).
+

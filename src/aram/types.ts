@@ -1,5 +1,6 @@
 export const ARAM_MODES = ['activity', 'activity-bits', 'bytes', 'bits', 'xor', 'xor-bits', 'entropy', 'entropy-bits'] as const;
 export type AramMode = typeof ARAM_MODES[number];
+export type MemorySampling = 'nearest' | 'smooth' | 'area';
 export const ARAM_MEASUREMENTS = ['activity', 'data', 'entropy'] as const;
 export type AramMeasurement = typeof ARAM_MEASUREMENTS[number];
 export type DataUnit = 'byte' | 'bit';

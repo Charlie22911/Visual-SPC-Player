@@ -3,6 +3,8 @@ import type { AramMode } from '../aram/renderer';
 import { decodeStandaloneText, decodeStandaloneWasm, getStandaloneAssets } from '../standalone';
 import { LoadRequestGate, copySnapshotForUi } from './coordination';
 import type { Snapshot, WorkletCommand, WorkletEvent } from './protocol';
+import { SpectrumAnalysisClient } from '../spectrum/analysisClient';
+import type { SpectrumFrame, SpectrumOptions } from '../spectrum/types';
 
 export type EngineState = 'idle' | 'initializing' | 'ready' | 'loading' | 'playing' | 'paused' | 'interrupted' | 'failed' | 'disposed';
 
@@ -11,6 +13,7 @@ export type EngineEvents = {
   loaded: Extract<WorkletEvent, { type: 'loaded' }>;
   state: Extract<WorkletEvent, { type: 'state' }>;
   snapshot: Snapshot;
+  spectrum: SpectrumFrame;
   error: Extract<WorkletEvent, { type: 'error' }>;
   status: { state: EngineState; contextState: AudioContextState | 'closed' };
 };
@@ -91,6 +94,19 @@ export class SpcAudioEngine {
   private disposed = false;
   private engineState: EngineState = 'idle';
   private stateBeforeInterruption: EngineState = 'paused';
+  private requestedSpectrum: SpectrumOptions | null = null;
+  private clockAnchor = { generation: 0, nativeFrame: 0, contextTime: 0, playing: false };
+  private spectrum = new SpectrumAnalysisClient((epoch, port) => {
+    if (this.node) this.post({ type: 'spectrum', epoch, port }, port ? [port] : []);
+    else port?.close();
+  }, (frame) => {
+    if (frame.generation === this.loads.committed?.generation) this.emit('spectrum', frame);
+  }, (message) => this.emit('error', { type: 'error', fatal: false, message }));
+  private visibilityListener = () => this.updateSpectrum();
+
+  constructor() {
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.visibilityListener);
+  }
 
   get sampleRate() { return this.context?.sampleRate ?? 0; }
   get contextState() { return this.context?.state ?? 'closed'; }
@@ -157,6 +173,7 @@ export class SpcAudioEngine {
         this.setEngineState('interrupted');
       }
       this.emitStatus();
+      this.updateSpectrum();
     };
     await loadAudioWorklet(context);
     if (this.disposed) throw new Error('The audio engine was disposed during startup');
@@ -202,6 +219,7 @@ export class SpcAudioEngine {
     await ready;
     this.post({ type: 'volume', gain: this.requestedVolume });
     this.setEngineState('ready');
+    this.updateSpectrum();
   }
 
   async loadFile(file: File, paused = false, reservedLoadId?: number, activation?: Promise<void>) {
@@ -251,9 +269,43 @@ export class SpcAudioEngine {
     return this.requestId;
   }
 
+  setSpectrumOptions(options: { fftSize: number; hopSize: number } | null) {
+    if (options && (![1024, 2048, 4096].includes(options.fftSize) || ![64, 128, 256, 512].includes(options.hopSize))) {
+      throw new RangeError('Unsupported spectrum FFT size or hop');
+    }
+    this.requestedSpectrum = options ? { ...options } as SpectrumOptions : null;
+    this.updateSpectrum();
+  }
+
+  /** Presented audio media time, extrapolated from the audio clock, never wall time. */
+  spectrumClock() {
+    const anchor = this.clockAnchor;
+    const context = this.context;
+    if (!context || !anchor.generation) return { generation: anchor.generation, nativeFrame: anchor.nativeFrame, playing: false };
+    let presented = context.currentTime - (context.baseLatency || 0) - (context.outputLatency || 0);
+    const timestamp = context.getOutputTimestamp?.();
+    if (timestamp?.performanceTime && timestamp.contextTime !== undefined) {
+      presented = timestamp.contextTime + Math.max(0, performance.now() - timestamp.performanceTime) / 1000;
+    }
+    presented = Math.min(context.currentTime, Math.max(0, presented));
+    let frame = anchor.nativeFrame + (presented - anchor.contextTime) * 32000;
+    if (!anchor.playing || context.state !== 'running') frame = Math.min(anchor.nativeFrame, frame);
+    return { generation: anchor.generation, nativeFrame: Math.max(0, frame),
+      playing: anchor.playing && context.state === 'running' };
+  }
+
+  spectrumStats() { return this.spectrum.stats(); }
+
+  private updateSpectrum() {
+    const active = this.node && !this.disposed && !document.hidden && this.context?.state === 'running';
+    this.spectrum.configure(active ? this.requestedSpectrum : null);
+  }
+
   async dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    document.removeEventListener('visibilitychange', this.visibilityListener);
+    this.spectrum.dispose();
     this.initializationFailure?.(new Error('The audio engine was disposed'));
     this.failWaiters(new Error('The audio engine was disposed'));
     await this.cleanupPartialInitialization();
@@ -261,6 +313,7 @@ export class SpcAudioEngine {
   }
 
   private async cleanupPartialInitialization() {
+    this.spectrum.configure(null);
     const node = this.node;
     const context = this.context;
     this.node = null;
@@ -281,9 +334,15 @@ export class SpcAudioEngine {
       if (!this.loads.commit(event.loadId, event.generation)) return;
       this.loadWaiters.get(event.loadId)?.resolve(event.generation);
       this.loadWaiters.delete(event.loadId);
+      this.clockAnchor = { generation: event.generation, nativeFrame: 0, contextTime: this.context?.currentTime ?? 0, playing: !event.paused };
       this.setEngineState(event.paused ? 'paused' : 'playing');
     }
-    if (event.type === 'state') this.setEngineState(event.playing ? 'playing' : 'paused');
+    if (event.type === 'state') {
+      if (event.generation < this.clockAnchor.generation) return;
+      this.clockAnchor = { generation: event.generation, nativeFrame: event.audibleFrame,
+        contextTime: event.contextTime ?? this.context?.currentTime ?? 0, playing: event.playing };
+      this.setEngineState(event.playing ? 'playing' : 'paused');
+    }
     if (event.type === 'error' && event.loadId !== undefined) {
       if (!this.loads.isCurrent(event.loadId)) return;
       this.loadWaiters.get(event.loadId)?.reject(new Error(event.message));

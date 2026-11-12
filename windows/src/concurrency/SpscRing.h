@@ -10,6 +10,10 @@ template<class T, std::size_t N> class SpscRing {
     alignas(64) std::atomic<std::size_t> read_{0};
     std::array<T, N> slots_{};
 public:
+    // Diagnostic snapshot only; never use this to authorize slot ownership.
+    std::size_t approximate_size() const noexcept {
+        return (write_.load(std::memory_order_acquire)-read_.load(std::memory_order_acquire)) & (N-1);
+    }
     T* producer_slot() noexcept {
         const auto w = write_.load(std::memory_order_relaxed);
         if (((w + 1) & (N - 1)) == read_.load(std::memory_order_acquire)) return nullptr;

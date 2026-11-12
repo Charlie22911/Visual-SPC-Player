@@ -40,7 +40,26 @@ function(spc_test_warnings target)
     endif()
 endfunction()
 
+add_library(spc_spectrum_core STATIC spectrum/spectrum.c
+    vendor/kissfft/kiss_fft.c vendor/kissfft/kiss_fftr.c)
+target_include_directories(spc_spectrum_core PUBLIC . PRIVATE vendor/kissfft)
+if(NOT MSVC)
+    target_link_libraries(spc_spectrum_core PUBLIC m)
+endif()
+
 if(EMSCRIPTEN)
+    add_executable(spc_spectrum spectrum/wasm_entry.c)
+    target_link_libraries(spc_spectrum PRIVATE spc_spectrum_core)
+    set_target_properties(spc_spectrum PROPERTIES OUTPUT_NAME "spc_spectrum" SUFFIX ".wasm"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../public")
+    if(EMSCRIPTEN_VERSION VERSION_LESS "3.1.27")
+        set(SPC_SPECTRUM_STACK "-sTOTAL_STACK=65536")
+    else()
+        set(SPC_SPECTRUM_STACK "-sSTACK_SIZE=65536")
+    endif()
+    target_link_options(spc_spectrum PRIVATE --no-entry -sSTANDALONE_WASM=1
+        -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=2097152 ${SPC_SPECTRUM_STACK}
+        -sEXPORTED_FUNCTIONS=_spc_spectrum_configure,_spc_spectrum_reset,_spc_spectrum_input,_spc_spectrum_output,_spc_spectrum_push,_spc_spectrum_offset)
     add_executable(spc_core wasm_entry.cpp)
     target_link_libraries(spc_core PRIVATE spc_web_core)
     set_target_properties(spc_core PROPERTIES
@@ -55,6 +74,10 @@ if(EMSCRIPTEN)
         -sEXPORTED_FUNCTIONS=_web_spc_abi_version,_web_spc_init,_web_spc_prepare,_web_spc_commit_prepared,_web_spc_render,_web_spc_copy_aram,_web_spc_take_activity,_web_spc_copy_state,_web_spc_generated_frames,_web_spc_generation,_web_spc_dispose,_malloc,_free)
 else()
     enable_testing()
+    add_executable(spc_spectrum_api_test tests/spectrum_api_test.c)
+    target_link_libraries(spc_spectrum_api_test PRIVATE spc_spectrum_core)
+    spc_test_warnings(spc_spectrum_api_test)
+    add_test(NAME spc_spectrum_api COMMAND spc_spectrum_api_test)
     option(SPC_DESKTOP_STATIC_CORE "Link the desktop emulator into its caller" OFF)
     if(SPC_DESKTOP_STATIC_CORE)
         add_library(spc_native_core STATIC desktop_api.cpp state_packet.cpp)

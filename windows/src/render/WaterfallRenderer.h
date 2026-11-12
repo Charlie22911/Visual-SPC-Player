@@ -12,7 +12,8 @@ class WaterfallRenderer {
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> target_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> constants_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertex_;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_, areaPixel_;
+    unsigned outputWidth_ = 0, outputHeight_ = 0;
     ViewConfig config_{};
     unsigned width_ = 0, height_ = 0, seconds_ = 0;
     uint32_t generation_ = 0;
@@ -35,7 +36,7 @@ public:
     WaterfallRenderer(ID3D11Device*, ID3D11DeviceContext*);
     void configure(const ViewConfig&, unsigned height, unsigned seconds);
     void update(const History&, double budgetMilliseconds);
-    void draw(unsigned palette);
+    void draw(unsigned palette, unsigned sampling = 0, unsigned outputWidth = 0, unsigned outputHeight = 0, bool temporal = false, unsigned temporalMs = 0);
     const ReducedRow& inspect(const History&, int64_t band);
     ID3D11ShaderResourceView* texture() const noexcept { return outputView_.Get(); }
     std::size_t pendingCount() const noexcept { return pending_.size(); }

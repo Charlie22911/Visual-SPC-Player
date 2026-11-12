@@ -4,7 +4,7 @@ import { artifactPath, browserLaunchOptions } from './browser-environment.mjs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { selectMemoryView, memoryRuntime } from './browser-view-helpers.mjs';
+import { selectMemoryView, setLibraryOpen, installMemoryTools, readMemoryCanvas, mapCellPoint } from './browser-view-helpers.mjs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const browser = await chromium.launch(browserLaunchOptions);
 const image = new Uint8Array(0x10180);
@@ -38,14 +38,16 @@ const geometry = page => page.locator('.waterfall-plot canvas').evaluate(c => ({
 }));
 const inspect = (page, x, y, map = false) => page.locator(map ? '.map-stage' : '.waterfall-plot').evaluate((plot, point) => {
   const bounds = plot.getBoundingClientRect();
-  plot.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: bounds.left + point.x, clientY: bounds.top + point.y }));
+  const canvas = plot.querySelector('canvas');
+  const surface = canvas.getBoundingClientRect();
+  plot.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: point.map ? bounds.left + point.x : surface.left + point.x * surface.width / canvas.width, clientY: point.map ? bounds.top + point.y : surface.top + point.y * surface.height / canvas.height }));
   return document.querySelector(point.map ? '.map-metric-inspector' : '.waterfall-inspector').textContent;
 }, { x, y, map });
-const mapPixel = (page, x, y) => page.locator('.map-stage canvas').evaluate((c, point) => [...c.getContext('2d').getImageData(point.x, point.y, 1, 1).data], { x, y });
+const mapPixel = (page, x, y) => page.locator('.map-stage canvas').evaluate(readMemoryCanvas, { x, y });
 const waterfallPixel = (page, lane = 0) => page.locator('.waterfall-plot canvas').evaluate((c, lane) => {
   const config = window.memoryRuntime().renderer.config, lanes = Number(c.dataset.pixelsPerBucket);
   const logicalWidth = config.columns * lanes;
-  return [...c.getContext('2d').getImageData(Math.floor((8 * lanes + lane + .5) * c.width / logicalWidth), Math.floor(20.5 * c.height / config.height), 1, 1).data];
+  return window.readMemoryCanvas(c, { x: Math.floor((8 * lanes + lane + .5) * c.width / logicalWidth), y: Math.floor(20.5 * c.height / config.height), space: 'physical' });
 }, lane);
 try {
   for (const c of [
@@ -59,12 +61,13 @@ try {
     assert.deepEqual(await page.getByLabel('Memory measurement').locator('option').allTextContents(), ['Activity', 'Data', 'Entropy']);
     await page.locator('input[accept=".spc"]').setInputFiles({ name: 'data-controls.spc', mimeType: 'application/octet-stream', buffer: Buffer.from(image) });
     await page.locator('.track-list button').first().click();
+    await setLibraryOpen(page, false);
     await page.getByRole('button', { name: 'Pause', exact: true }).waitFor(); await page.waitForTimeout(200);
     await page.getByRole('button', { name: 'Pause', exact: true }).click(); await page.waitForTimeout(100);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.locator('.setting-row select').selectOption('grayscale');
     await page.getByRole('button', { name: 'ARAM', exact: true }).click();
-    await page.evaluate('window.memoryRuntime = ' + memoryRuntime.toString());
+    await installMemoryTools(page);
     const captured = await inject(page, 'xor');
     await selectMemoryView(page, 'bytes'); await settle(page);
     assert.deepEqual(await mapPixel(page, 100, 100), [143, 143, 143, 255]);
@@ -105,10 +108,7 @@ try {
     assert.deepEqual(await mapPixel(page, 400, 200), black);
     assert.deepEqual(await mapPixel(page, 403, 201), white);
     // Convert the logical tile into the fitted viewport's pointer coordinates.
-    const point = await page.locator('.map-stage canvas').evaluate(c => {
-      const b = c.getBoundingClientRect(), stage = c.parentElement.getBoundingClientRect();
-      return { x: b.left - stage.left + 403.5 * b.width / c.width, y: b.top - stage.top + 201.5 * b.height / c.height };
-    });
+    const point = await page.locator('.map-stage canvas').evaluate(mapCellPoint, { x: 403, y: 201 });
     assert.match(await inspect(page, point.x, point.y, true), /Bit 0 · 1\.000 bits.*256-byte block/);
     await selectMemoryView(page, 'entropy'); await settle(page);
     assert.deepEqual(await mapPixel(page, 100, 100), [32, 32, 32, 255]);

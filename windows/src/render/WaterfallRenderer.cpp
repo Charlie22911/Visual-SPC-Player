@@ -2,6 +2,7 @@
 #include "model/PaletteTables.h"
 #include "FullscreenVS.h"
 #include "WaterfallPS.h"
+#include "WaterfallAreaPS.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -10,6 +11,7 @@ WaterfallRenderer::WaterfallRenderer(ID3D11Device* device, ID3D11DeviceContext* 
     : device_(device), context_(context) {
     checkGpu(device->CreateVertexShader(FullscreenVSBytecode, sizeof(FullscreenVSBytecode), nullptr, &vertex_));
     checkGpu(device->CreatePixelShader(WaterfallPSBytecode, sizeof(WaterfallPSBytecode), nullptr, &pixel_));
+    checkGpu(device->CreatePixelShader(WaterfallAreaPSBytecode, sizeof(WaterfallAreaPSBytecode), nullptr, &areaPixel_));
     D3D11_BUFFER_DESC cb{}; cb.ByteWidth = sizeof(ShaderConfig); cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     checkGpu(device->CreateBuffer(&cb, nullptr, &constants_));
     D3D11_TEXTURE2D_DESC desc{};
@@ -55,6 +57,7 @@ void WaterfallRenderer::configure(const ViewConfig& config, unsigned height, uns
         checkGpu(device_->CreateTexture2D(&desc, nullptr, &outputTexture_));
         checkGpu(device_->CreateShaderResourceView(outputTexture_.Get(), nullptr, &outputView_));
         checkGpu(device_->CreateRenderTargetView(outputTexture_.Get(), nullptr, &target_));
+        outputWidth_ = width; outputHeight_ = height;
         slots_.assign(height, std::numeric_limits<int64_t>::min());
         rowData_.resize(width * 2); rowFlags_.resize(width);
     }
@@ -140,18 +143,34 @@ const ReducedRow& WaterfallRenderer::inspect(const History& history, int64_t ban
     }
     return inspected_;
 }
-void WaterfallRenderer::draw(unsigned palette) {
+void WaterfallRenderer::draw(unsigned palette, unsigned sampling, unsigned outputWidth, unsigned outputHeight, bool temporal, unsigned temporalMs) {
     if (!width_) return;
+    const bool area = sampling == 2 || temporal;
+    const unsigned ow = sampling == 2 && outputWidth ? outputWidth : width_;
+    const unsigned oh = sampling == 2 && outputHeight ? outputHeight : height_;
+    if (!ow || !oh || ow > 16384 || oh > 16384) throw std::runtime_error("Invalid waterfall output size");
+    if (ow != outputWidth_ || oh != outputHeight_) {
+        context_->OMSetRenderTargets(0, nullptr, nullptr);
+        ID3D11ShaderResourceView* empty[9]{}; context_->PSSetShaderResources(0,9,empty);
+        outputView_.Reset(); target_.Reset(); outputTexture_.Reset();
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width=ow; desc.Height=oh; desc.ArraySize=desc.MipLevels=desc.SampleDesc.Count=1;
+        desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM; desc.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+        checkGpu(device_->CreateTexture2D(&desc,nullptr,&outputTexture_));
+        checkGpu(device_->CreateShaderResourceView(outputTexture_.Get(),nullptr,&outputView_));
+        checkGpu(device_->CreateRenderTargetView(outputTexture_.Get(),nullptr,&target_));
+        outputWidth_=ow; outputHeight_=oh;
+    }
     const ShaderConfig config{static_cast<uint32_t>(config_.measurement), config_.bits, config_.changesOnly, config_.underlay,
-        std::min(palette, 4u), 0, 0, height_, static_cast<uint32_t>(newestBand_ % height_), width_, 0, 0};
+        std::min(palette, 4u), temporal ? 1u : 0u, temporalMs ? std::max(1u, static_cast<unsigned>(std::round(temporalMs * height_ / (seconds_ * 1000.0)))) : 1u, height_, static_cast<uint32_t>(newestBand_ % height_), width_, ow, oh};
     context_->UpdateSubresource(constants_.Get(), 0, nullptr, &config, 0, 0);
-    D3D11_VIEWPORT viewport{0, 0, static_cast<float>(width_), static_cast<float>(height_), 0, 1};
+    D3D11_VIEWPORT viewport{0, 0, static_cast<float>(ow), static_cast<float>(oh), 0, 1};
     context_->RSSetViewports(1, &viewport); context_->RSSetState(nullptr);
     ID3D11ShaderResourceView* unbound[8]{}; context_->PSSetShaderResources(0, 8, unbound);
     auto* target = target_.Get(); context_->OMSetRenderTargets(1, &target, nullptr);
     context_->OMSetBlendState(nullptr, nullptr, 0xffffffff); context_->OMSetDepthStencilState(nullptr, 0);
     context_->IASetInputLayout(nullptr); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context_->VSSetShader(vertex_.Get(), nullptr, 0); context_->PSSetShader(pixel_.Get(), nullptr, 0); context_->GSSetShader(nullptr, nullptr, 0);
+    context_->VSSetShader(vertex_.Get(), nullptr, 0); context_->PSSetShader(area ? areaPixel_.Get() : pixel_.Get(), nullptr, 0); context_->GSSetShader(nullptr, nullptr, 0);
     auto* cb = constants_.Get(); context_->PSSetConstantBuffers(0, 1, &cb);
     ID3D11ShaderResourceView* inputs[8]{}; inputs[4] = paletteView_.Get(); inputs[6] = rowsView_.Get(); inputs[7] = flagsView_.Get();
     context_->PSSetShaderResources(0, 8, inputs); context_->Draw(3, 0);

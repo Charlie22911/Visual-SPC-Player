@@ -12,6 +12,25 @@ int main() {
     settings.mode = 1; settings.dataBits = true; settings.xorData = true; settings.waterfall = true;
     copy = parseSettings(serializeSettings(settings));
     CHECK(copy.mode == 1 && copy.dataBits && copy.xorData && copy.waterfall);
+    for(int sampling=0;sampling<3;++sampling) {
+        settings.mapSampling=sampling; settings.waterfallSampling=sampling; settings.waterfallTemporal=true;
+        CHECK(parseSettings(serializeSettings(settings)).waterfallSampling==sampling);
+        CHECK(parseSettings(serializeSettings(settings)).waterfallTemporal);
+        CHECK(parseSettings(serializeSettings(settings)).mapSampling==sampling);
+    }
+    settings.spectrogram=true; settings.waterfallTemporalMs=150;
+    settings.spectrumPalette=1; settings.spectrumDifference=true; settings.spectrumPreset=4; settings.spectrumFft=4096; settings.spectrumHop=64;
+    auto spectrumSettings=parseSettings(serializeSettings(settings));
+    CHECK(spectrumSettings.spectrumPalette==1);
+    CHECK(spectrumSettings.spectrumDifference && spectrumSettings.spectrumPreset==4 && spectrumSettings.spectrumFft==4096 && spectrumSettings.spectrumHop==64);
+
+    CHECK(parseSettings(serializeSettings(settings)).spectrogram);
+    CHECK(parseSettings(serializeSettings(settings)).waterfallTemporalMs==150);
+    auto extension=settingsJson(settings);
+    extension.erase("native"); CHECK(parseSettings(extension.dump()).mapSampling==0);
+    extension["native"]={{"mapSampling","future"}}; CHECK(parseSettings(extension.dump()).mapSampling==0);
+    extension["native"]["mapSampling"]=17;
+    bool badType=false; try { parseSettings(extension.dump()); } catch(...) { badType=true; } CHECK(badType);
     auto legacy = settingsJson(settings);
     legacy["version"] = 1; legacy["settings"]["mode"] = "bits";
     copy = parseSettings(legacy.dump());

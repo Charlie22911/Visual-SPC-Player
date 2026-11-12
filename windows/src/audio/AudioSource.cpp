@@ -3,8 +3,8 @@
 #include <cmath>
 #include <memory>
 namespace visual_spc {
-AudioSource::AudioSource(unsigned rate, CaptureQueue& captures)
-    : captures_(captures), resampler_(rate), outputRate_(rate) { cadence_.reset(0); }
+AudioSource::AudioSource(unsigned rate, CaptureQueue& captures, SpectrumQueue* spectrum)
+    : captures_(captures), spectrum_(spectrum), resampler_(rate), outputRate_(rate) { cadence_.reset(0); }
 void AudioSource::ramp(float target) noexcept {
     gainTarget_ = target;
     if (gain_ == target) { rampRemaining_ = 0; gainStep_ = 0; return; }
@@ -22,6 +22,7 @@ void AudioSource::setVolume(float volume) noexcept {
 spc_native_instance* AudioSource::replace(spc_native_instance* prepared, uint32_t generation) noexcept {
     auto* old = active_; active_ = prepared; generation_ = generation;
     sequence_ = discontinuity_ = 0;
+    spectrumDiscontinuity_ = 0;
     sourceBase_ = intervalBegin_ = spc_native_generated_frames(active_);
     resampler_.reset(); cadence_.reset(sourceBase_); gain_ = 0; ramp(playing_ ? volume_ : 0);
     if (active_) capture();
@@ -32,6 +33,7 @@ void AudioSource::reconfigure(unsigned rate) {
     resampler_ = std::move(*replacement); outputRate_ = rate;
     sourceBase_ = intervalBegin_ = spc_native_generated_frames(active_);
     cadence_.reset(sourceBase_); ++discontinuity_; gain_ = 0;
+    ++spectrumDiscontinuity_;
     ramp(playing_ ? volume_ : 0);
     if (active_) capture();
 }
@@ -65,6 +67,14 @@ bool AudioSource::feed(std::size_t requested) noexcept {
             requested, std::min<uint64_t>(512, cadence_.next() - generated)));
         if (!count || spc_native_render(active_, scratch_.data(), count) != SPC_NATIVE_OK ||
             !resampler_.push(scratch_.data(), count)) return false;
+        if (spectrum_ && spectrum_->captureEnabled()) {
+            if (auto* packet = spectrum_->producer_slot()) {
+                packet->generation = generation_; packet->nativeFrame = generated;
+                packet->discontinuity = spectrumDiscontinuity_; packet->frameCount = count;
+                std::copy_n(scratch_.data(), count * 2, packet->pcm.data());
+                spectrum_->publish();
+            } else spectrum_->recordDrop();
+        }
         requested -= count;
     }
     if (spc_native_generated_frames(active_) == cadence_.next()) {

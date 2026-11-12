@@ -24,7 +24,7 @@ Result render(SidebarState& state, bool waterfall = false, int mode = 0, bool se
         ImGui::GetStyle().FontScaleDpi, state);
     result.changed = drawWorkspace(state, [&] {
         FlowToolbar tabs;
-        for (const auto* label : {"ARAM", "Voices", "DSP", "Track", "Settings", "About"}) {
+        for (const auto* label : {"ARAM", "Voices", "DSP", "Spectrogram", "Track", "Settings", "About"}) {
             const float width = std::max(70 * ImGui::GetStyle().FontScaleDpi, FlowToolbar::buttonWidth(label));
             tabs.next(width);
             ImGui::Selectable(label, false, 0, ImVec2(width, 0));
@@ -38,7 +38,7 @@ Result render(SidebarState& state, bool waterfall = false, int mode = 0, bool se
             CHECK(ImGui::GetItemRectMax().x <= right + 0.5f);
             if (ImGui::GetItemRectMin().y != lastY) { ++result.toolbarRows; lastY = ImGui::GetItemRectMin().y; }
         };
-        for (const auto* label : {"Map", "Waterfall"}) {
+        for (const auto* label : {"Map", "Waterfall", "Spectrogram"}) {
             toolbar.next(FlowToolbar::toggleWidth(label)); ImGui::RadioButton(label, false); checkItem();
         }
         toolbar.next(120 * ImGui::GetStyle().FontScaleDpi); ImGui::SetNextItemWidth(120 * ImGui::GetStyle().FontScaleDpi);

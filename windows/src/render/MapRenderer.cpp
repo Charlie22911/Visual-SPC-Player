@@ -2,6 +2,7 @@
 #include "model/PaletteTables.h"
 #include "FullscreenVS.h"
 #include "MapPS.h"
+#include "AreaPS.h"
 #include <cstring>
 #include <algorithm>
 namespace visual_spc {
@@ -34,6 +35,8 @@ MapRenderer::MapRenderer(ID3D11Device* device, ID3D11DeviceContext* context) : d
     checkGpu(device->CreateBuffer(&cb, nullptr, &constants_));
     checkGpu(device->CreateVertexShader(FullscreenVSBytecode, sizeof(FullscreenVSBytecode), nullptr, &vertex_));
     checkGpu(device->CreatePixelShader(MapPSBytecode, sizeof(MapPSBytecode), nullptr, &pixel_));
+    checkGpu(device->CreatePixelShader(AreaPSBytecode, sizeof(AreaPSBytecode), nullptr, &areaPixel_));
+    cb.ByteWidth = 16; checkGpu(device->CreateBuffer(&cb, nullptr, &presentation_));
 }
 void MapRenderer::upload(const HistoryRecord& current, const HistoryRecord* previous,
     const std::array<uint8_t, 24576>& access, const std::array<uint8_t, 65536>& persistence,
@@ -49,8 +52,11 @@ void MapRenderer::upload(const HistoryRecord& current, const HistoryRecord* prev
     context_->UpdateSubresource(entropy_.Get(), 0, nullptr, values.data(), 0, 0);
     previousValid_ = previous != nullptr;
 }
-void MapRenderer::draw(const ViewConfig& view, unsigned palette, bool persistent) {
-    const unsigned width = view.bits ? 1024 : 256, height = view.bits ? 512 : 256;
+void MapRenderer::draw(const ViewConfig& view, unsigned palette, bool persistent, unsigned outputWidth, unsigned outputHeight, float originX, float originY, float cell, float cellY) {
+    const bool area = outputWidth && outputHeight;
+    const unsigned width = area ? outputWidth : (view.bits ? 1024 : 256), height = area ? outputHeight : (view.bits ? 512 : 256);
+    const float transform[4]{originX, originY, cell, cellY > 0 ? cellY : cell};
+    context_->UpdateSubresource(presentation_.Get(), 0, nullptr, transform, 0, 0);
     if (width != width_ || height != height_) {
         context_->OMSetRenderTargets(0, nullptr, nullptr);
         output_.Reset(); targetView_.Reset(); target_.Reset();
@@ -71,9 +77,10 @@ void MapRenderer::draw(const ViewConfig& view, unsigned palette, bool persistent
     auto* target = targetView_.Get(); context_->OMSetRenderTargets(1, &target, nullptr);
     context_->OMSetBlendState(nullptr, nullptr, 0xffffffff); context_->OMSetDepthStencilState(nullptr, 0);
     context_->IASetInputLayout(nullptr); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context_->VSSetShader(vertex_.Get(), nullptr, 0); context_->PSSetShader(pixel_.Get(), nullptr, 0);
+    context_->VSSetShader(vertex_.Get(), nullptr, 0); context_->PSSetShader(area ? areaPixel_.Get() : pixel_.Get(), nullptr, 0);
     context_->GSSetShader(nullptr, nullptr, 0);
     auto* cb = constants_.Get(); context_->PSSetConstantBuffers(0, 1, &cb);
+    auto* presentation = presentation_.Get(); context_->PSSetConstantBuffers(1, 1, &presentation);
     ID3D11ShaderResourceView* inputs[6]{};
     for (unsigned i = 0; i < 6; ++i) inputs[i] = inputs_[i].Get();
     context_->PSSetShaderResources(0, 6, inputs); context_->Draw(3, 0);

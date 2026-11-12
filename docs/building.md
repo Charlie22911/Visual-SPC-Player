@@ -103,3 +103,5 @@ This runs the full build and places `Visual-SPC-Player.html` and `SHA256SUMS` in
 The build workflow under `.github/workflows/` runs application, native, WebAssembly, protocol, parity, and browser checks and retains the generated HTML as a workflow artifact. It does not create tags, publish a release, or deploy the site.
 
 Before distributing `dist/` or the HTML, check that the bundle contains no `.spc`, `.wav`, or `.pcm` files.
+
+The web build also uses Python 3 to generate the complete offline source ZIP. `pnpm build:native` builds both the SPC core and the fixed-memory spectrum analyser. Run it before the unit suite on a clean checkout. The spectrum renderer requires WebGL 2 with floating-point colour buffers for GPU acceleration; other browsers use the numeric Canvas fallback.

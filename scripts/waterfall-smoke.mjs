@@ -4,7 +4,7 @@ import { artifactPath, browserLaunchOptions, browserName } from './browser-envir
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-import { selectMemoryView } from './browser-view-helpers.mjs';
+import { selectMemoryView, setLibraryOpen } from './browser-view-helpers.mjs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const url = process.env.SPC_PREVIEW_URL || 'http://127.0.0.1:4173/';
 const image = new Uint8Array(0x10180);
@@ -21,7 +21,9 @@ const watch = page => {
 };
 const load = async page => {
   await page.locator('input[accept=".spc"]').setInputFiles(upload);
+  await setLibraryOpen(page, true);
   await page.locator('.track-list button').first().click();
+  await setLibraryOpen(page, false);
   await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
 };
 // Read diagnostics from existing React state, without a production debug API.
@@ -129,9 +131,13 @@ await page.getByRole('button', { name: 'ARAM', exact: true }).click();
 await page.getByRole('button', { name: 'Play', exact: true }).click(); await page.waitForTimeout(200);
 const prior = await sample(page);
 await page.locator('input[accept=".spc"]').setInputFiles({ name: 'invalid.spc', mimeType: 'application/octet-stream', buffer: Buffer.alloc(64) });
+await setLibraryOpen(page, true);
 await page.locator('.track-list button').first().click(); await page.waitForTimeout(300);
+await setLibraryOpen(page, false);
 assert.equal((await sample(page)).generation, prior.generation);
 assert((await sample(page)).latestId > prior.latestId, 'Failed replacement must preserve playback history');
+assert.match(await page.getByRole('alert').textContent(), /not a supported SPC file/);
+await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
 await page.getByRole('button', { name: 'Restart', exact: true }).click(); await page.waitForTimeout(300);
 assert((await sample(page)).generation > prior.generation);
 await page.getByRole('button', { name: 'Voices', exact: true }).click(); await page.waitForTimeout(200);
@@ -149,7 +155,8 @@ await local.getByRole('button', { name: 'Waterfall', exact: true }).click();
 for (const mode of modes) { await selectMemoryView(local, mode); await local.waitForTimeout(80); }
 await local.getByRole('button', { name: '1:1', exact: true }).click();
 const localCanvas = local.locator('.waterfall-plot canvas');
-assert.equal(Number(await localCanvas.getAttribute('width')), Number(await localCanvas.getAttribute('data-columns')) * Number(await localCanvas.getAttribute('data-pixels-per-bucket')) * 2);
+assert.equal(Number(await localCanvas.getAttribute('width')), Number(await localCanvas.getAttribute('data-columns')) * Number(await localCanvas.getAttribute('data-pixels-per-bucket')),
+  '1:1 displays each bit lane in one physical output pixel at DPR 2');
 const phonePlot = await local.getByLabel('Zoomable ARAM waterfall').boundingBox();
 const cdp = await phone.newCDPSession(local);
 const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y, id]) => ({ x, y, id })) });

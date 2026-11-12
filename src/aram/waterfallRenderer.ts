@@ -3,6 +3,9 @@ import { blockEntropies, blockBitEntropies, createReducedRow, reduceRow, type Re
 import { activityBytePalette, activityBitPalette, activityPalette, bitPalette, bytePalette, metricPalette, type PalettePreset, type Rgba } from './palettes';
 import { isActivityMode, isBitMode, isEntropyMode, isXorMode, type AramMode } from './types';
 import type { AddressWindow } from './waterfallViewport';
+import { NumericGpu } from './numericGpu';
+import { temporalSample, type NumericSource } from './sampling';
+import type { MemorySampling } from './types';
 
 export const intervalBands = (start: number, end: number, size: number): [number, number] => [Math.floor(start / size), Math.ceil(end / size) - 1];
 type CacheEntry = { row?: ReducedRow; entropy?: Float32Array; bytes: number };
@@ -107,8 +110,9 @@ function rowColor(row: ReducedRow, mode: AramMode, x: number, palette: PalettePr
   return table.metrics[Math.max(0, Math.min(255, Math.round(t * 255)))];
 }
 
-export type WaterfallOptions = BandOptions & { height: number; palette: PalettePreset };
-// The backing canvas is plot-sized in logical pixels; its display can be DPR-scaled.
+export type WaterfallOptions = BandOptions & { height: number; palette: PalettePreset; sampling?: MemorySampling; temporal?: boolean; temporalMs?: number };
+// Live views use a physical-pixel numeric ring texture. The Canvas path remains
+// incremental and is also used when WebGL 2 is unavailable.
 export class WaterfallRenderer {
   readonly cache = new ReducedRowCache();
   private options: WaterfallOptions | null = null;
@@ -117,33 +121,46 @@ export class WaterfallRenderer {
   private epochGeneration = -1;
   private oldestId = -1;
   private image: ImageData | null = null;
-  constructor(readonly canvas: HTMLCanvasElement, private readonly history: MemoryHistory) {}
+  private readonly gpu: NumericGpu | null;
+  private slots = new Float64Array(0);
+  constructor(readonly canvas: HTMLCanvasElement, private readonly history: MemoryHistory, useGpu = false) {
+    this.gpu = useGpu ? NumericGpu.create(canvas, true) : null;
+    // Once WebGL has claimed a canvas, a later initialization failure cannot
+    // turn it into a 2D canvas. Keep the fallback on fresh offscreen storage.
+    if (useGpu && !this.gpu && !canvas.getContext('2d')) this.canvas = canvas.ownerDocument.createElement('canvas');
+  }
+  get accelerated() { return this.gpu !== null; }
   get currentBand() { return this.newestBand; }
   get pendingCount() { return this.pending.size; }
   get config() { return this.options; }
   configure(options: WaterfallOptions) {
     if (JSON.stringify(this.options) === JSON.stringify(options)) return;
+    const prior = this.options;
+    const presentationOnly = prior && prior.mode === options.mode && prior.columns === options.columns && prior.height === options.height && prior.framesPerBand === options.framesPerBand && prior.window.start === options.window.start && prior.window.span === options.window.span && prior.activityByteBackground === options.activityByteBackground;
     this.options = options; this.canvas.width = options.columns * (isBitMode(options.mode) ? 8 : 1); this.canvas.height = options.height;
+    if (presentationOnly && this.gpu) { this.present(); return; }
+    if (this.gpu) { this.gpu.configureRows(this.canvas.width, options.height); this.slots = new Float64Array(options.height); this.slots.fill(NaN); }
     this.image = null; this.newestBand = -1; this.pending.clear();
   }
   update() {
     const options = this.options, latest = this.history.latest();
-    const context = this.canvas.getContext('2d'); if (!options || !context) return;
+    const context = this.gpu ? null : this.canvas.getContext('2d'); if (!options || (!context && !this.gpu)) return;
     if (!latest) {
       this.cache.clear(); this.newestBand = -1; this.oldestId = -1; this.pending.clear();
-      context.fillStyle = '#101722'; context.fillRect(0, 0, this.canvas.width, options.height);
+      if (this.gpu) { this.gpu.clearRows(); this.present(); }
+      else if (context) { context.fillStyle = '#101722'; context.fillRect(0, 0, this.canvas.width, options.height); }
       return;
     }
-    if (this.epochGeneration !== latest.generation) { this.cache.clear(); this.newestBand = -1; this.pending.clear(); this.epochGeneration = latest.generation; }
+    if (this.epochGeneration !== latest.generation) { this.cache.clear(); this.newestBand = -1; this.pending.clear(); this.epochGeneration = latest.generation; this.gpu?.clearRows(); this.slots.fill(NaN); }
     const nextBand = Math.floor(latest.audibleFrame / options.framesPerBand);
     const bands = options.height, width = this.canvas.width;
     const delta = nextBand - this.newestBand, shift = delta;
     if (this.newestBand < 0 || delta < 0 || shift >= options.height) {
-      context.clearRect(0, 0, width, options.height); this.pending.clear();
+      context?.clearRect(0, 0, width, options.height); this.gpu?.clearRows(); this.slots.fill(NaN); this.pending.clear();
       for (let k = nextBand; k > nextBand - bands; k--) this.pending.add(k);
     } else if (shift > 0) {
-      context.drawImage(this.canvas, 0, 0, width, options.height - shift, 0, shift, width, options.height - shift);
-      context.clearRect(0, 0, width, shift);
+      context?.drawImage(this.canvas, 0, 0, width, options.height - shift, 0, shift, width, options.height - shift);
+      context?.clearRect(0, 0, width, shift);
       for (let k = nextBand; k > this.newestBand; k--) this.pending.add(k);
     }
     this.newestBand = nextBand;
@@ -159,17 +176,45 @@ export class WaterfallRenderer {
       this.oldestId = oldest.id;
     }
     const unavailableY = Math.max(0, Math.min(options.height, nextBand - oldestBand + 1));
-    context.fillStyle = '#101722'; context.fillRect(0, unavailableY, width, options.height - unavailableY);
+    if (context) { context.fillStyle = '#101722'; context.fillRect(0, unavailableY, width, options.height - unavailableY); }
     for (const k of this.pending) if (k > nextBand || k <= nextBand - bands || k < oldestBand) this.pending.delete(k);
+    if (!this.gpu && options.temporal) {
+      const radius = Math.max(1, Math.round(Math.max(10, Math.min(200, options.temporalMs ?? 50)) * 32 / options.framesPerBand));
+      // An evicted or revised older band also changes the causal window of
+      // newer pixels. The GPU reads these dependencies directly from its ring.
+      for (const k of [...this.pending]) for (let age = 1; age <= radius && k + age <= nextBand; age++) this.pending.add(k + age);
+    }
+    if (this.gpu) {
+      for (let slot = 0; slot < this.slots.length; slot++) if (this.slots[slot] < oldestBand) { this.gpu.invalidateRow(this.slots[slot]); this.slots[slot] = NaN; }
+      for (const k of this.pending) { const slot = ((k % bands) + bands) % bands; if (this.slots[slot] !== k) { this.gpu.invalidateRow(k); this.slots[slot] = k; } }
+    }
   }
   flush(budgetMs = 4) {
-    const options = this.options, context = this.canvas.getContext('2d'); if (!options || !context) return;
+    const options = this.options, context = this.gpu ? null : this.canvas.getContext('2d'); if (!options || (!context && !this.gpu)) return;
     const started = performance.now(), lanes = isBitMode(options.mode) ? 8 : 1;
-    if (!this.image) this.image = context.createImageData(options.columns * lanes, 1);
+    if (!this.image && context) this.image = context.createImageData(options.columns * lanes, 1);
     const dirty = [...this.pending].sort((a, b) => b - a);
+    const radius = options.temporal ? Math.max(1, Math.round(Math.max(10, Math.min(200, options.temporalMs ?? 50)) * 32 / options.framesPerBand)) : 0;
+    const rows = new Map<number, ReducedRow>();
+    const source: NumericSource = (x, y) => {
+      const k = this.newestBand - y;
+      let row = rows.get(k); if (!row) { row = composeBand(this.history, this.cache, options, k).row; rows.set(k, row); }
+      const column = Math.floor(x / lanes), index = (x % lanes) * options.columns + column;
+      return { value: row.values[index], background: row.byteValues?.[column] ?? row.bitValues?.[index] ?? 0, kind: isActivityMode(options.mode) ? row.values[index] : 0, held: 0, changed: !!row.anyChange?.[column], valid: row.valid };
+    };
     for (const k of dirty) {
       const band = composeBand(this.history, this.cache, options, k);
-      const data = this.image.data;
+      if (this.gpu) { this.gpu.uploadRow(k, band.row, options.columns); this.pending.delete(k); if (performance.now() - started >= budgetMs) break; continue; }
+      const data = this.image!.data;
+      if (radius && band.row.valid) {
+        // Smooth measurements/underlays causally, preserving this band's exact
+        // access mask. The reduced history remains unfiltered for inspection.
+        for (let lane = 0; lane < lanes; lane++) for (let x = 0; x < options.columns; x++) {
+          const index = lane * options.columns + x, cell = temporalSample(source, x * lanes + lane, this.newestBand - k, options.height, radius, isActivityMode(options.mode));
+          if (isActivityMode(options.mode)) { if (band.row.byteValues) band.row.byteValues[x] = cell.background; if (band.row.bitValues) band.row.bitValues[index] = cell.background; }
+          else band.row.values[index] = cell.value;
+        }
+      }
       for (let lane = 0; lane < lanes; lane++) for (let x = 0; x < options.columns; x++) {
         // Bit planes stay lane-major in the reduction cache. Interleave them
         // horizontally here so every canvas row describes one time band.
@@ -177,10 +222,13 @@ export class WaterfallRenderer {
         const color = rowColor(band.row, options.mode, lane * options.columns + x, options.palette);
         data[offset] = color[0]; data[offset + 1] = color[1]; data[offset + 2] = color[2]; data[offset + 3] = 255;
       }
-      context.putImageData(this.image, 0, this.newestBand - k); this.pending.delete(k);
+      context!.putImageData(this.image!, 0, this.newestBand - k); this.pending.delete(k);
       if (performance.now() - started >= budgetMs) break;
     }
+    this.present();
   }
+  present() { if (this.gpu && this.options) this.gpu.draw(this.options, this.canvas.width, this.canvas.height, this.newestBand); }
+  dispose() { this.gpu?.dispose(); }
   inspect(pixel: number, y: number) {
     if (!this.options) return null;
     const lanes = isBitMode(this.options.mode) ? 8 : 1;

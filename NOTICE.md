@@ -34,4 +34,6 @@ Their `REVISION.txt` files record the pinned source revisions. The Windows execu
 
 ## Distribution
 
-The static site and standalone HTML include these notices, retained license texts, and native sources with build instructions. Settings provides links to the notices and source bundle. Retain the applicable notices and corresponding source when redistributing, including the LGPL source and relinking requirements for snes_spc.
+The static site and standalone HTML include these notices, retained license texts, and native sources with build instructions. About provides the notices, licenses, and complete source ZIP. Retain the applicable notices and corresponding source when redistributing, including the LGPL source and relinking requirements for snes_spc.
+
+KISS FFT by Mark Borgerding provides spectrogram analysis in both the Windows and WebAssembly builds. The BSD-3-Clause license, copyright notices and pinned revision are retained in `native/vendor/kissfft`; the complete notice is included in About.

@@ -14,7 +14,7 @@ Selected music stays on your device. No music is bundled with the application.
 
 For a portable copy, [download Visual-SPC-Player.html](https://github.com/Charlie22911/Visual-SPC-Player/releases/latest/download/Visual-SPC-Player.html) and open it in your browser.
 
-For the native Windows application and build instructions, see the [Windows guide](docs/windows.md).
+For Windows, [download Visual-SPC-Player.exe](https://github.com/Charlie22911/Visual-SPC-Player/releases/latest/download/Visual-SPC-Player.exe). The portable executable includes About, license texts, and an exportable copy of the complete matching source. See the [Windows guide](docs/windows.md) for usage and rebuilding.
 
 **SNEStronizer** is music by **AceMan** from **Resistance's TwistIT** SNES / Super Famicom demo. Visit the [TwistIT repository](https://github.com/ResistanceVault/demo-twistit) or [view the SPC on GitHub](https://github.com/ResistanceVault/demo-twistit/blob/master/data/SNEStronizer.spc).
 
@@ -25,7 +25,10 @@ For the native Windows application and build instructions, see the [Windows guid
 - Inspect all 64 KiB of ARAM as Activity, Data, or Entropy.
 - Switch between a 2D Map and a scrolling Waterfall, with zoom down to individual bytes or bits.
 - Choose Byte or Bit representations, show matching data beneath Activity, and use XOR to highlight captured changes.
+- Apply Nearest, Smooth, or Area sampling to Map and Waterfall, with optional causal temporal filtering for Waterfall data.
+- Open the separate Spectrogram tab for stereo audio power, analysis presets, adjustable FFT/hop, palettes, sampling, smoothing, and phase-sensitive stereo difference.
 - Inspect all eight DSP voices, 128 DSP registers, and ID666 track metadata.
+- Collapse or pin the floating library and inspect usage, licenses, and source in About.
 - Save and export settings, measure snapshot cadence, and cache the hosted app for offline use.
 
 ## Portable release
@@ -52,7 +55,9 @@ Generate the standalone file and release checksum with:
 pnpm build:release
 ```
 
-The outputs are `release/v<version>/Visual-SPC-Player.html` and `SHA256SUMS`. Generated releases and `dist/` stay outside Git. See [building and testing](docs/building.md) for the complete toolchain and verification commands.
+The browser outputs are `release/v<version>/Visual-SPC-Player.html` and `SHA256SUMS`. Releases also include the Windows executable and complete source ZIP. Generated releases and `dist/` stay outside Git. See [building and testing](docs/building.md) for the complete toolchain and verification commands.
+
+The browser uses WebAssembly for SPC emulation and FFT analysis, with FFT work in a dedicated worker. WebGL 2 renders numeric memory textures and cached spectrum rows; Canvas provides a functional fallback when the required graphics features are unavailable. Filtering operates on numeric values before colours are applied. Spectrogram capture, analysis, and graphics history stop when its tab is inactive or the page is hidden; reopening it starts fresh history at the current audio position. WebGPU and cross-origin isolation are not required.
 
 ## Source layout
 

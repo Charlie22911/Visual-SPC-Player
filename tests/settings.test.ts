@@ -69,3 +69,40 @@ test('stored Data and Entropy choices round trip, and legacy modes take preceden
 test.each([{ dataUnit: 'bits' }, { dataXor: 'on' }, { entropyUnit: 'bytes' }, { entropyUnit: undefined }])('rejects invalid version 3 representation values %j', change => {
   expect(() => parseSettingsFile(JSON.stringify({ format: 'visual-spc-player-settings', version: 3, settings: { ...defaultSettings, ...change } }))).toThrow('invalid value');
 });
+
+test('native sampling and temporal preferences survive import, export and browser storage', () => {
+  const text = JSON.stringify({ format: 'visual-spc-player-settings', version: 3, settings: defaultSettings,
+    native: { mapSampling: 'area', waterfallSampling: 'smooth', waterfallTemporal: true, waterfallTemporalMs: 125 } });
+  const settings = parseSettingsFile(text);
+  expect(settings).toMatchObject({ mapSampling: 'area', waterfallSampling: 'smooth', waterfallTemporal: true, waterfallTemporalMs: 125 });
+  expect(JSON.parse(serializeSettingsFile(settings)).native).toMatchObject({ mapSampling: 'area', waterfallSampling: 'smooth', waterfallTemporal: true, waterfallTemporalMs: 125 });
+  expect(saveStoredSettings(settings).ok).toBe(true);
+  expect(loadStoredSettings().settings).toEqual(settings);
+});
+
+test('earlier settings initialize independent sampling and temporal defaults', () => {
+  expect(parseSettingsFile(JSON.stringify({ format: 'visual-spc-player-settings', version: 1, settings: legacy }))).toMatchObject({
+    mapSampling: 'nearest', waterfallSampling: 'nearest', waterfallTemporal: false, waterfallTemporalMs: 50,
+  });
+});
+
+test.each([{ mapSampling: 'cubic' }, { waterfallSampling: false }, { waterfallTemporal: 'on' }, { waterfallTemporalMs: 201 }, { waterfallTemporalMs: 10.5 }])('rejects invalid native rendering preference %j', native => {
+  expect(() => parseSettingsFile(JSON.stringify({ format: 'visual-spc-player-settings', version: 3, settings: defaultSettings, native }))).toThrow('invalid value');
+});
+
+test('native spectrum choices import and export without losing independent display controls', () => {
+  const native = { spectrumPalette: 1, spectrumPreset: 2, spectrumFft: 4096, spectrumHop: 128, spectrumSampling: 2,
+    spectrumSeconds: 10, spectrumTemporalMs: 75, spectrumDifference: true, spectrumLog: false,
+    spectrumTemporal: true, spectrumFloor: -105, spectrumCeiling: -10 };
+  const settings = parseSettingsFile(JSON.stringify({ format: 'visual-spc-player-settings', version: 3, settings: defaultSettings, native }));
+  expect(settings.spectrum).toEqual({ preset: 'frequency', palette: 'heat', fftSize: 4096, hopSize: 128, sampling: 'area',
+    seconds: 10, temporalMs: 75, difference: true, logarithmic: false, temporal: true, floorDb: -105, ceilingDb: -10 });
+  expect(JSON.parse(serializeSettingsFile(settings)).native).toMatchObject(native);
+  saveStoredSettings(settings);
+  expect(loadStoredSettings().settings).toEqual(settings);
+});
+
+test.each([{ spectrumPreset: 'balanced' }, { spectrumFft: 1536 }, { spectrumHop: 32 }, { spectrumPalette: 3 }, { spectrumSampling: 4 },
+  { spectrumSeconds: 3 }, { spectrumTemporalMs: -1 }, { spectrumTemporal: 'on' }, { spectrumFloor: -121 }, { spectrumCeiling: 1 }])('rejects invalid native spectrum preference %j', native => {
+  expect(() => parseSettingsFile(JSON.stringify({ format: 'visual-spc-player-settings', version: 3, settings: defaultSettings, native }))).toThrow('invalid value');
+});

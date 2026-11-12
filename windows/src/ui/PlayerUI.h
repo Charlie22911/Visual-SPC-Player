@@ -12,11 +12,14 @@ public:
     ~PlayerUI();
     void tick();
     void draw();
+    void maintainGraphics(bool visible=true);
     void open(const std::vector<std::filesystem::path>&);
     void graphicsReset(D3DDevice&);
     void setDisplayRate(unsigned numerator, unsigned denominator);
     double targetRate() const noexcept;
     bool continuous() const noexcept;
-    void setSmokeVolume();
+    void setSmokeVolume(bool spectrogram = false, bool stress = false);
+    void setSmokePanel(unsigned);
+    void writeSpectrumReport(const std::filesystem::path&);
 };
 }

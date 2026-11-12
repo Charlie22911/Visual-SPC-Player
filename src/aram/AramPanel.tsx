@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { VisualStream } from '../audio/visualStream';
 import type { Snapshot } from '../audio/protocol';
 import type { VisualizerRate } from '../settings';
@@ -6,7 +7,7 @@ import type { MemoryHistory } from './history';
 import { MapView } from './MapView';
 import { WaterfallView, type WaterfallInfo } from './WaterfallView';
 import { bytePalette, metricPalette, type PalettePreset } from './palettes';
-import { ARAM_MEASUREMENTS, renderingMode, isBitMode, isXorMode, isEntropyMode, type AramMeasurement, type DataUnit, type AramGeometry, type WaterfallSeconds } from './types';
+import { ARAM_MEASUREMENTS, renderingMode, isBitMode, isXorMode, isEntropyMode, type AramMeasurement, type DataUnit, type AramGeometry, type WaterfallSeconds, type MemorySampling } from './types';
 import type { DrawStats, MemoryViewHandle } from './viewTypes';
 type Props = {
   mode: AramMeasurement; onModeChange(mode: AramMeasurement): void; geometry: AramGeometry; onGeometryChange(geometry: AramGeometry): void;
@@ -17,6 +18,11 @@ type Props = {
   activityByteBackground: boolean; onActivityByteBackgroundChange(enabled: boolean): void;
   snapshot: Snapshot | null; stream: VisualStream; generation: number; history: MemoryHistory; playing: boolean;
   palette: PalettePreset; activityPersistence: boolean; activityPersistenceMilliseconds: number; refreshRate: VisualizerRate; displayHz: number | null;
+  mapSampling?: MemorySampling; onMapSamplingChange?(sampling: MemorySampling): void;
+  waterfallSampling?: MemorySampling; onWaterfallSamplingChange?(sampling: MemorySampling): void;
+  waterfallTemporal?: boolean; onWaterfallTemporalChange?(enabled: boolean): void;
+  waterfallTemporalMs?: number; onWaterfallTemporalMsChange?(milliseconds: number): void;
+  footerTarget?: HTMLElement | null;
 };
 export function AramPanel(props: Props) {
   const { mode, geometry, palette, history } = props;
@@ -25,6 +31,7 @@ export function AramPanel(props: Props) {
   const map = useRef<MemoryViewHandle>(null), waterfall = useRef<MemoryViewHandle>(null);
   const [stats, setStats] = useState<DrawStats>({ rate: 0, averageMs: 0, maxMs: 0 });
   const [info, setInfo] = useState<WaterfallInfo | null>(null);
+  const [inspectorTarget, setInspectorTarget] = useState<HTMLDivElement | null>(null);
   const onStats = useCallback((next: DrawStats) => setStats(next), []);
   const onInfo = useCallback((next: WaterfallInfo) => setInfo(next), []);
   const controls = () => geometry === 'map' ? map.current : waterfall.current;
@@ -46,12 +53,14 @@ export function AramPanel(props: Props) {
         {mode === 'data' && <label className="activity-byte-toggle" title="Show the mask of bits changed since the preceding continuous capture"><input type="checkbox" aria-label="XOR changes only" checked={props.dataXor} onChange={event => props.onDataXorChange(event.target.checked)} />XOR</label>}
         {mode === 'activity' && <label className="activity-byte-toggle" title="Darkened data at the interval's end with all address activity during that interval; activity trails are bypassed"><input type="checkbox" aria-label={backgroundLabel} checked={props.activityByteBackground} onChange={event => props.onActivityByteBackgroundChange(event.target.checked)} />{backgroundLabel}</label>}
         {geometry === 'waterfall' && <select aria-label="Waterfall time span" value={props.waterfallSeconds} onChange={event => props.onWaterfallSecondsChange(Number(event.target.value) as WaterfallSeconds)}>{[2, 5, 10].map(value => <option key={value} value={value}>{value} s</option>)}</select>}
+        <select aria-label={`${geometry === 'map' ? 'Map' : 'Waterfall'} sampling`} value={(geometry === 'map' ? props.mapSampling : props.waterfallSampling) ?? 'nearest'} onChange={event => (geometry === 'map' ? props.onMapSamplingChange : props.onWaterfallSamplingChange)?.(event.target.value as MemorySampling)}>{(['nearest', 'smooth', 'area'] as const).map(value => <option key={value} value={value}>{value === 'nearest' ? 'Nearest' : value === 'smooth' ? 'Smooth' : 'Area'}</option>)}</select>
+        {geometry === 'waterfall' && <><label className="activity-byte-toggle" title="Causal smoothing of measurements and data underneath activity; access timing stays unchanged"><input type="checkbox" aria-label="Waterfall temporal filter" checked={props.waterfallTemporal ?? false} onChange={event => props.onWaterfallTemporalChange?.(event.target.checked)} />Temporal</label><label className="waterfall-temporal-window"><input type="number" aria-label="Waterfall temporal window milliseconds" min={10} max={200} step={10} value={props.waterfallTemporalMs ?? 50} disabled={!props.waterfallTemporal} onChange={event => props.onWaterfallTemporalMsChange?.(Math.max(10, Math.min(200, Number(event.target.value) || 10)))} /> ms</label></>}
       </div>
       <div className="zoom-controls"><button onClick={() => controls()?.zoom(0.8)} aria-label="Zoom out">−</button><button onClick={() => controls()?.fit()}>Fit</button><button onClick={() => controls()?.oneToOne()}>1:1</button><button onClick={() => controls()?.zoom(1.25)} aria-label="Zoom in">+</button></div>
     </div>
-    <MapView ref={map} active={geometry === 'map'} memoryHistory={history} onStats={onStats} {...props} mode={renderMode} />
-    <WaterfallView ref={waterfall} active={geometry === 'waterfall'} mode={renderMode} activityByteBackground={props.activityByteBackground} seconds={props.waterfallSeconds} palette={palette} history={history} stream={props.stream} generation={props.generation} displayHz={props.displayHz} onStats={onStats} onInfo={onInfo} />
-    <div className="visual-status">
+    <MapView ref={map} active={geometry === 'map'} memoryHistory={history} onStats={onStats} {...props} mode={renderMode} inspectorTarget={props.footerTarget ? inspectorTarget : null} />
+    <WaterfallView ref={waterfall} active={geometry === 'waterfall'} mode={renderMode} activityByteBackground={props.activityByteBackground} seconds={props.waterfallSeconds} palette={palette} history={history} stream={props.stream} generation={props.generation} displayHz={props.displayHz} onStats={onStats} onInfo={onInfo} waterfallSampling={props.waterfallSampling} waterfallTemporal={props.waterfallTemporal} waterfallTemporalMs={props.waterfallTemporalMs} inspectorTarget={props.footerTarget ? inspectorTarget : null} />
+    {(() => { const footer = <div className="aram-footer">{props.footerTarget && <div className="aram-footer-inspector" ref={setInspectorTarget} />}<div className="visual-status">
       <span className="live-status">{props.playing ? 'Live' : 'Paused'} · {stats.rate} draws/s</span>
       <span>Target · {props.refreshRate === 'display' ? `${props.displayHz ?? '…'} Hz display` : `${props.refreshRate} Hz`}</span>
       <span title="Canvas submission time; excludes display latency">Render · {stats.averageMs.toFixed(2)} ms avg · {stats.maxMs.toFixed(2)} ms max</span>
@@ -63,12 +72,12 @@ export function AramPanel(props: Props) {
         mode === 'entropy' ? <><div className="entropy-scale"><div className="value-gradient" style={{ background: gradient }} /><div className="scale-ticks">{[0, .25, .5, .75, 1].map(t => <span key={t}>{(t * (props.entropyUnit === 'bit' ? 1 : 8)).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>)}</div></div><span>{props.entropyUnit === 'bit' ? 'bits per position · 0 = fixed · 1 = equal 0s and 1s' : 'bits/byte · 0 = repeated value · 8 = maximum diversity'}</span><span>256-byte blocks · hover or tap for values</span></> :
         isBitMode(renderMode) ? <><span><i className="bit-off" />0</span><span><i className="bit-on" />1</span><span>{geometry === 'map' ? 'MSB → LSB in each 4 × 2 byte tile' : 'Bit 7 → 0 left to right per bucket · 1:1 = one pixel per bit'}</span></> :
         <><span>$00</span><span className="value-gradient" style={{ background: gradient }} /><span>$FF</span></>}
-      {geometry === 'waterfall' && mode === 'data' && !props.dataXor && props.dataUnit === 'byte' && <span>Bucket mean · latest sampled value</span>}
+      {geometry === 'waterfall' && mode === 'data' && !props.dataXor && props.dataUnit === 'byte' && <span>Bucket mean · latest sampled value{props.waterfallTemporal ? ` · ${props.waterfallTemporalMs ?? 50} ms causal filter` : ''}</span>}
       {mode === 'activity' && props.activityByteBackground && <span>Interval activity + ending {props.activityUnit === 'bit' ? 'bits' : 'bytes'}{geometry === 'map' ? ' · trails off' : ''}</span>}
       {mode === 'activity' && props.activityUnit === 'bit' && <span>Accesses apply to the whole byte · {geometry === 'map' ? 'Bit 7 → 0 in each 4 × 2 tile' : 'Bit 7 → 0 per bucket · 1:1 = one pixel per bit'}</span>}
       {isXorMode(renderMode) && <span>XOR mask · {geometry === 'waterfall' ? 'all changed bits in each time band' : 'consecutive captures'} · 0 = unchanged</span>}
       {isXorMode(renderMode) && geometry === 'map' && !baseline && <span>Baseline unavailable</span>}
       {geometry === 'map' && !isXorMode(renderMode) && !isEntropyMode(renderMode) && !(mode === 'activity' && props.activityByteBackground) && props.activityPersistence && <span>Activity trail · {props.activityPersistenceMilliseconds.toLocaleString()} ms</span>}
-    </div>
+    </div></div>; return props.footerTarget ? createPortal(footer, props.footerTarget) : footer; })()}
   </section>;
 }

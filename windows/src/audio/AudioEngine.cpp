@@ -153,6 +153,7 @@ struct AudioEngine::Impl {
     enum class Kind { Replace, Play, Volume, Rate };
     struct Command { Kind kind; spc_native_instance* instance = nullptr; uint32_t first = 0, second = 0; float value = 0; };
     std::unique_ptr<CaptureQueue> captures = std::make_unique<CaptureQueue>();
+    std::unique_ptr<SpectrumQueue> spectrum = std::make_unique<SpectrumQueue>();
     SpscRing<Command, 16> commands;
     SpscRing<spc_native_instance*, 32> retired;
     SpscRing<ClockAnchor, 128> anchors;
@@ -216,7 +217,7 @@ struct AudioEngine::Impl {
             checked(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator)));
             notification.Attach(new DeviceNotification(deviceRevision, wake));
             checked(enumerator->RegisterEndpointNotificationCallback(notification.Get()));
-            source = std::make_unique<AudioSource>(48000, *captures);
+            source = std::make_unique<AudioSource>(48000, *captures, spectrum.get());
             uint64_t epoch = 0;
             bool wantedPlaying = false, fading = false;
             while (!stop) {
@@ -316,6 +317,7 @@ bool AudioEngine::popAnchor(ClockAnchor& anchor) {
     anchor = *slot; impl_->anchors.consume(); return true;
 }
 CaptureQueue& AudioEngine::captures() noexcept { return *impl_->captures; }
+SpectrumQueue& AudioEngine::spectrum() noexcept { return *impl_->spectrum; }
 unsigned AudioEngine::sampleRate() const noexcept { return impl_->rate.load(); }
 long AudioEngine::lastError() const noexcept { return impl_->error.load(); }
 }

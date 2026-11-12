@@ -65,3 +65,102 @@ float4 WaterfallPS(float4 position : SV_POSITION) : SV_TARGET {
     if (bits && data.x > 0) index = max(1, index);
     return color(bits ? 1 : 0, index);
 }
+
+// Physical plot pixels. Numeric reduction occurs before palette lookup.
+cbuffer MapPresentation : register(b1) { float2 mapOrigin; float cellSize; float cellSizeY; };
+float4 AreaPS(float4 position : SV_POSITION) : SV_TARGET {
+    float2 dimensions = float2(bits ? 1024 : 256, bits ? 512 : 256);
+    float2 lo = max(0, (floor(position.xy) - mapOrigin) / float2(cellSize, cellSizeY));
+    float2 hi = min(dimensions, (floor(position.xy) + 1 - mapOrigin) / float2(cellSize, cellSizeY));
+    float4 background = float4(2,5,12,255) / 255;
+    if (any(hi <= lo)) return background;
+    float total = 0, weight = 0;
+    uint kinds = 0, heldKinds = 0;
+    bool changed = false;
+    [loop] for (int y = (int)floor(lo.y); y < (int)ceil(hi.y); ++y) {
+        float wy = max(0, min(hi.y, y + 1.0) - max(lo.y, (float)y));
+        [loop] for (int x = (int)floor(lo.x); x < (int)ceil(hi.x); ++x) {
+            float w = wy * max(0, min(hi.x, x + 1.0) - max(lo.x, (float)x));
+            if (w <= 0) continue;
+            uint2 p = uint2(x,y);
+            uint a = bits ? ((p.y >> 1) * 256 + (p.x >> 2)) : p.y * 256 + p.x;
+            uint lane = bits ? ((p.y & 1) * 4 + (p.x & 3)) : 0;
+            uint value = CurrentRam.Load(int3(a & 255, a >> 8, 0));
+            if (changes) value ^= PreviousRam.Load(int3(a & 255, a >> 8, 0));
+            if (bits) value = (value >> (7-lane)) & 1;
+            total += w * (mode == 2 ? Entropy[lane * 256 + (a >> 8)] : (float)value);
+            weight += w; changed = changed || value != 0;
+            if (mode == 0 && !(persistent && !underlay)) kinds |= accessAt(a);
+            if (persistent && ((mode == 0 && !underlay) || (mode == 1 && !changes))) heldKinds |= Persistence.Load(int3(a & 255, a >> 8, 0));
+        }
+    }
+    float mean = total / weight;
+    float4 result;
+    if (mode == 0) result = activityColor(persistent && !underlay ? heldKinds : kinds, mean);
+    else if (mode == 2) result = color(2, (uint)floor(saturate(mean / (bits ? 1 : 8)) * 255 + 0.5));
+    else if (changes && !previousValid) result = color(2, ((uint)floor(position.x) & 8) ? 20 : 35);
+    else {
+        uint index = (uint)floor(clamp(mean * (bits ? 255 : 1), 0, 255) + 0.50001);
+        if (changes && changed) index = max(1, index);
+        result = color(bits ? 1 : 0, index);
+        if (persistent && !changes && heldKinds) result.rgb = result.rgb * 0.55 + color(3, heldKinds).rgb * 0.45;
+    }
+    float coverage = saturate((hi.x-lo.x)*(hi.y-lo.y)*cellSize*cellSizeY);
+    return lerp(background, result, coverage);
+}
+
+// Resample chronological numeric bands, never interpolate physical ring slots.
+float4 WaterfallAreaPS(float4 position : SV_POSITION) : SV_TARGET {
+    float2 ratio = float2(renderWidth, ringHeight) / float2(unused0, unused1);
+    float2 lo = floor(position.xy) * ratio;
+    float2 hi = min(float2(renderWidth,ringHeight), (floor(position.xy)+1)*ratio);
+    // Enlargement remains nearest independently on each axis.
+    if (ratio.x <= 1) { lo.x = floor((position.x)*ratio.x); hi.x = lo.x+1; }
+    if (ratio.y <= 1) { lo.y = floor((position.y)*ratio.y); hi.y = lo.y+1; }
+    float total=0, background=0, validWeight=0;
+    uint kinds=0; bool changed=false;
+    [loop] for(int y=(int)floor(lo.y);y<(int)ceil(hi.y);++y) {
+        float wy=max(0,min(hi.y,y+1.0)-max(lo.y,(float)y));
+        uint slot=(newestSlot+ringHeight-(uint)y)%ringHeight;
+        [loop] for(int x=(int)floor(lo.x);x<(int)ceil(hi.x);++x) {
+            float w=wy*max(0,min(hi.x,x+1.0)-max(lo.x,(float)x));
+            if(w<=0) continue;
+            uint flags=RowFlags.Load(int3(x,slot,0));
+            if(!(flags&1)) continue;
+            float2 data=Rows.Load(int3(x,slot,0));
+            if(previousValid) {
+                // Time-based causal triangular low-pass, bounded to eight taps.
+                float2 sum=data*2; float norm=2;
+                uint radius=max(1,persistent);
+                uint step=max(1,(radius+7)/8);
+                [loop] for(uint age=step; age<=radius; age+=step) {
+                    uint olderY=(uint)y+age;
+                    if(olderY>=ringHeight) break;
+                    uint olderSlot=(newestSlot+ringHeight-olderY)%ringHeight;
+                    uint olderFlags=RowFlags.Load(int3(x,olderSlot,0));
+                    if(!(olderFlags&1)) break;
+                    float weight=2.0*(radius+step-age)/(radius+step);
+                    float2 older=Rows.Load(int3(x,olderSlot,0));
+                    if(mode==0) sum.y+=older.y*weight; else sum.x+=older.x*weight;
+                    norm+=weight;
+                }
+                if(mode==0) data.y=sum.y/norm; else data.x=sum.x/norm;
+            }
+            validWeight+=w; background+=w*data.y;
+            if(mode==0) kinds|=(uint)data.x; else total+=w*data.x;
+            changed=changed || ((flags&2)!=0);
+        }
+    }
+    float4 missing=float4(16,23,34,255)/255;
+    if(validWeight<=0) return missing;
+    float value=total/validWeight;
+    float4 result;
+    if(mode==0) result=activityColor(kinds,background/validWeight);
+    else if(mode==2) result=color(2,(uint)floor(saturate(value/(bits?1:8))*255+0.50001));
+    else {
+        uint index=(uint)floor(clamp(value*(bits?255:1),0,255)+0.50001);
+        if((changes && changed) || (bits && value>0)) index=max(1,index);
+        result=color(bits?1:0,index);
+    }
+    return lerp(missing,result,saturate(validWeight/((hi.x-lo.x)*(hi.y-lo.y))));
+}

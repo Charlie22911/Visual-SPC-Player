@@ -108,6 +108,10 @@ export class ActivityHistory {
   kindAt(address: number, now: number) {
     return now - this.seenAt[address] <= this.decayMilliseconds ? this.kinds[address] : 0;
   }
+
+  copyKinds(target: Uint8Array, now: number) {
+    for (let address = 0; address < 65536; address++) target[address] = this.kindAt(address, now);
+  }
 }
 
 export const renderAram = (

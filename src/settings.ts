@@ -1,7 +1,9 @@
 import { ARAM_MEASUREMENTS, type AramMeasurement, type DataUnit, type AramGeometry, type WaterfallSeconds } from './aram/types';
 import type { PalettePreset } from './aram/palettes';
+import { defaultSpectrumSettings, normalizeSpectrumSettings, type SpectrumSettings } from './spectrum/settings';
 
 export type VisualizerRate = 30 | 60 | 'display';
+export type DisplaySampling = 'nearest' | 'smooth' | 'area';
 
 export type AppSettings = {
   mode: AramMeasurement;
@@ -11,6 +13,11 @@ export type AppSettings = {
   entropyUnit: DataUnit;
   geometry: AramGeometry;
   waterfallSeconds: WaterfallSeconds;
+  mapSampling: DisplaySampling;
+  waterfallSampling: DisplaySampling;
+  waterfallTemporal: boolean;
+  waterfallTemporalMs: number;
+  spectrum: SpectrumSettings;
   visualizerRate: VisualizerRate;
   palette: PalettePreset;
   activityByteBackground: boolean;
@@ -23,7 +30,8 @@ export type AppSettings = {
 type SettingsFile = {
   format: 'visual-spc-player-settings';
   version: 3;
-  settings: AppSettings;
+  settings: Omit<AppSettings, 'mapSampling' | 'waterfallSampling' | 'waterfallTemporal' | 'waterfallTemporalMs' | 'spectrum'>;
+  native: Record<string, string | number | boolean>;
 };
 
 export const defaultSettings: AppSettings = {
@@ -32,6 +40,11 @@ export const defaultSettings: AppSettings = {
   dataUnit: 'byte', dataXor: false, entropyUnit: 'byte',
   geometry: 'map',
   waterfallSeconds: 5,
+  mapSampling: 'nearest',
+  waterfallSampling: 'nearest',
+  waterfallTemporal: false,
+  waterfallTemporalMs: 50,
+  spectrum: { ...defaultSpectrumSettings },
   visualizerRate: 30,
   palette: 'spectrum',
   activityByteBackground: false,
@@ -49,6 +62,27 @@ const legacySelection = (mode: string | null) => ({
   dataXor: mode === 'xor', entropyUnit: 'byte' as const,
 });
 const palettes: PalettePreset[] = ['spectrum', 'scope', 'original', 'grayscale', 'accessible'];
+const samplingModes: readonly string[] = ['nearest', 'smooth', 'area'];
+const spectrumPresets = ['balanced', 'transient', 'frequency', 'raw', 'custom'] as const;
+const spectrumPalettes = ['green', 'heat', 'grayscale'] as const;
+const readSpectrumStorage = (text: string | null) => {
+  try { return normalizeSpectrumSettings(text ? JSON.parse(text) : undefined); }
+  catch { return { ...defaultSpectrumSettings }; }
+};
+const nativeSpectrum = (value: Record<string, unknown>): SpectrumSettings => normalizeSpectrumSettings({
+  preset: spectrumPresets[value.spectrumPreset as number],
+  palette: spectrumPalettes[value.spectrumPalette as number],
+  sampling: samplingModes[value.spectrumSampling as number],
+  fftSize: value.spectrumFft, hopSize: value.spectrumHop, seconds: value.spectrumSeconds,
+  temporalMs: value.spectrumTemporalMs, temporal: value.spectrumTemporal,
+  difference: value.spectrumDifference, logarithmic: value.spectrumLog,
+  floorDb: value.spectrumFloor, ceilingDb: value.spectrumCeiling,
+});
+const storedSampling = (value: string | null): DisplaySampling => value === 'smooth' || value === 'area' ? value : 'nearest';
+export const normalizeWaterfallTemporalMs = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(10, Math.min(200, Math.round(parsed))) : defaultSettings.waterfallTemporalMs;
+};
 
 export const normalizePersistenceDuration = (value: unknown) => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -91,6 +125,11 @@ export const loadStoredSettings = (): { settings: AppSettings; warning?: string 
         entropyUnit: storage.getItem('spc-entropy-unit') === 'bit' ? 'bit' : 'byte',
         geometry: rawGeometry === 'waterfall' ? 'waterfall' : 'map',
         waterfallSeconds: rawSeconds === '2' ? 2 : rawSeconds === '10' ? 10 : 5,
+        mapSampling: storedSampling(storage.getItem('spc-map-sampling')),
+        waterfallSampling: storedSampling(storage.getItem('spc-waterfall-sampling')),
+        waterfallTemporal: storage.getItem('spc-waterfall-temporal') === 'on',
+        waterfallTemporalMs: normalizeWaterfallTemporalMs(storage.getItem('spc-waterfall-temporal-ms') ?? defaultSettings.waterfallTemporalMs),
+        spectrum: readSpectrumStorage(storage.getItem('spc-spectrum')),
         visualizerRate: rawRate === 'display' ? 'display' : rawRate === '60' ? 60 : 30,
         palette,
         activityByteBackground: storage.getItem('spc-activity-byte-background') === 'on',
@@ -124,6 +163,11 @@ export const saveStoredSettings = (settings: AppSettings) => {
     storage.setItem('spc-entropy-unit', settings.entropyUnit);
     storage.setItem('spc-geometry', settings.geometry);
     storage.setItem('spc-waterfall-seconds', String(settings.waterfallSeconds));
+    storage.setItem('spc-map-sampling', settings.mapSampling);
+    storage.setItem('spc-waterfall-sampling', settings.waterfallSampling);
+    storage.setItem('spc-waterfall-temporal', settings.waterfallTemporal ? 'on' : 'off');
+    storage.setItem('spc-waterfall-temporal-ms', String(settings.waterfallTemporalMs));
+    storage.setItem('spc-spectrum', JSON.stringify(settings.spectrum));
     storage.setItem('spc-hz', String(settings.visualizerRate));
     storage.setItem('spc-palette', settings.palette);
     storage.setItem('spc-palette-version', '2');
@@ -157,6 +201,22 @@ export const parseSettingsFile = (text: string): AppSettings => {
   }
 
   const settings = parsed.settings;
+  if (parsed.native !== undefined && !isRecord(parsed.native)) throw new Error('The settings file contains an invalid value.');
+  const native = (parsed.native ?? {}) as Record<string, unknown>;
+  const optionalChoice = (key: string, values: readonly unknown[]) => native[key] === undefined || values.includes(native[key]);
+  const optionalNumber = (key: string, min: number, max: number, integer = false) => native[key] === undefined
+    || (typeof native[key] === 'number' && Number.isFinite(native[key]) && (native[key] as number) >= min && (native[key] as number) <= max && (!integer || Number.isInteger(native[key])));
+  if (['mapSampling', 'waterfallSampling'].some(key => native[key] !== undefined && !samplingModes.includes(native[key] as string))
+    || (native.waterfallTemporal !== undefined && typeof native.waterfallTemporal !== 'boolean')
+    || !optionalNumber('waterfallTemporalMs', 10, 200, true)
+    || !optionalChoice('spectrumPreset', [0, 1, 2, 3, 4]) || !optionalChoice('spectrumPalette', [0, 1, 2])
+    || !optionalChoice('spectrumSampling', [0, 1, 2]) || !optionalChoice('spectrumFft', [1024, 2048, 4096])
+    || !optionalChoice('spectrumHop', [64, 128, 256, 512]) || !optionalChoice('spectrumSeconds', [2, 5, 10])
+    || !optionalNumber('spectrumTemporalMs', 0, 200, true) || !optionalNumber('spectrumFloor', -120, -30)
+    || !optionalNumber('spectrumCeiling', -30, 0)
+    || ['spectrumDifference', 'spectrumLog', 'spectrumTemporal', 'spectrogram'].some(key => native[key] !== undefined && typeof native[key] !== 'boolean')) {
+    throw new Error('The settings file contains an invalid value.');
+  }
   const supportedModes: readonly string[] = parsed.version === 1 ? ['activity', 'bytes', 'bits'] : parsed.version === 2 ? legacyModes : modes;
   if (!supportedModes.includes(settings.mode as string)
     || (parsed.version !== 1 && (!(settings.geometry === 'map' || settings.geometry === 'waterfall') || ![2, 5, 10].includes(settings.waterfallSeconds as number)))
@@ -183,6 +243,11 @@ export const parseSettingsFile = (text: string): AppSettings => {
     ...(parsed.version === 3 ? { mode: settings.mode as AramMeasurement, dataUnit: settings.dataUnit as DataUnit, dataXor: settings.dataXor as boolean, entropyUnit: settings.entropyUnit as DataUnit } : legacySelection(settings.mode as string)),
     geometry: parsed.version === 1 ? 'map' : settings.geometry as AramGeometry,
     waterfallSeconds: parsed.version === 1 ? 5 : settings.waterfallSeconds as WaterfallSeconds,
+    mapSampling: (native.mapSampling ?? defaultSettings.mapSampling) as DisplaySampling,
+    waterfallSampling: (native.waterfallSampling ?? defaultSettings.waterfallSampling) as DisplaySampling,
+    waterfallTemporal: native.waterfallTemporal === true,
+    waterfallTemporalMs: (native.waterfallTemporalMs ?? defaultSettings.waterfallTemporalMs) as number,
+    spectrum: nativeSpectrum(native),
     visualizerRate: settings.visualizerRate as VisualizerRate,
     palette: settings.palette as PalettePreset,
     activityByteBackground: settings.activityByteBackground === true,
@@ -193,8 +258,18 @@ export const parseSettingsFile = (text: string): AppSettings => {
   };
 };
 
-export const serializeSettingsFile = (settings: AppSettings) => JSON.stringify({
-  format: 'visual-spc-player-settings',
-  version: 3,
-  settings,
-} satisfies SettingsFile, null, 2) + '\n';
+export const serializeSettingsFile = (settings: AppSettings) => {
+  const { mapSampling, waterfallSampling, waterfallTemporal, waterfallTemporalMs, spectrum, ...shared } = settings;
+  return JSON.stringify({
+    format: 'visual-spc-player-settings',
+    version: 3,
+    settings: shared,
+    native: { mapSampling, waterfallSampling, waterfallTemporal, waterfallTemporalMs,
+      spectrumPreset: spectrumPresets.indexOf(spectrum.preset), spectrumPalette: spectrumPalettes.indexOf(spectrum.palette),
+      spectrumSampling: samplingModes.indexOf(spectrum.sampling), spectrumFft: spectrum.fftSize,
+      spectrumHop: spectrum.hopSize, spectrumSeconds: spectrum.seconds, spectrumTemporalMs: spectrum.temporalMs,
+      spectrumTemporal: spectrum.temporal, spectrumDifference: spectrum.difference, spectrumLog: spectrum.logarithmic,
+      spectrumFloor: spectrum.floorDb, spectrumCeiling: spectrum.ceilingDb,
+    },
+  } satisfies SettingsFile, null, 2) + '\n';
+};

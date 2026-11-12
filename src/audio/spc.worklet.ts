@@ -1,4 +1,5 @@
 import { StreamingSincResampler } from './resampler';
+import { SPECTRUM_PACKET_FRAMES, SPECTRUM_PCM_CREDITS, type SpectrumPcmCredit } from '../spectrum/types';
 import {
   ACTIVITY_BYTES,
   ARAM_BYTES,
@@ -9,6 +10,7 @@ import {
 } from './protocol';
 
 declare const sampleRate: number;
+declare const currentTime: number;
 declare const registerProcessor: (name: string, constructor: typeof AudioWorkletProcessor) => void;
 declare class AudioWorkletProcessor {
   readonly port: MessagePort;
@@ -65,6 +67,15 @@ class SpcProcessor extends AudioWorkletProcessor {
   private pendingLoad: PendingLoad | null = null;
   private pendingPauseCommandId: number | null = null;
   private renderFailed = false;
+  private renderSamples: Int16Array[] = [];
+  private clockContextTime = 0;
+  private spectrumPort: MessagePort | null = null;
+  private spectrumEpoch = 0;
+  private spectrumGeneration = 0;
+  private spectrumFrame = 0;
+  private spectrumDiscontinuity = 0;
+  private spectrumDropped = 0;
+  private spectrumPool: SpectrumPcmCredit[] = [];
 
   constructor(options?: AudioWorkletNodeOptions) {
     super(options);
@@ -107,6 +118,24 @@ class SpcProcessor extends AudioWorkletProcessor {
       case 'recycle':
         if (command.buffer.byteLength === SNAPSHOT_BYTES) this.snapshotPool.push(command.buffer);
         break;
+      case 'spectrum':
+        if (command.epoch < this.spectrumEpoch) { command.port?.close(); break; }
+        this.spectrumPort?.close();
+        this.spectrumPort = command.port;
+        this.spectrumEpoch = command.epoch;
+        this.spectrumPool.length = 0;
+        ++this.spectrumDiscontinuity;
+        if (command.port) {
+          const port = command.port;
+          port.onmessage = (event: MessageEvent<SpectrumPcmCredit>) => {
+            const credit = event.data;
+            if (port !== this.spectrumPort || credit.type !== 'credit' || credit.epoch !== this.spectrumEpoch ||
+              credit.buffer.byteLength !== SPECTRUM_PACKET_FRAMES * 4 || this.spectrumPool.length >= SPECTRUM_PCM_CREDITS) return;
+            // The worker prepares views and envelopes; capture never allocates them.
+            this.spectrumPool.push(credit);
+          };
+        }
+        break;
     }
   }
 
@@ -143,6 +172,8 @@ class SpcProcessor extends AudioWorkletProcessor {
       if (!this.renderPointer || !this.aramPointer || !this.activityPointer || !this.statePointer) {
         throw new Error('The SPC audio buffers could not be allocated');
       }
+      this.renderSamples = Array.from({ length: RENDER_FRAMES + 1 }, (_, frames) =>
+        new Int16Array(exports.memory.buffer, this.renderPointer, frames * 2));
       this.snapshotPool = Array.from({ length: 16 }, () => new ArrayBuffer(SNAPSHOT_BYTES));
       this.post({ type: 'ready', sampleRate, abiVersion: 1 });
     } catch (error) {
@@ -185,7 +216,7 @@ class SpcProcessor extends AudioWorkletProcessor {
     this.commitPendingLoad();
   }
 
-  private commitPendingLoad() {
+  private commitPendingLoad(atContextTime = currentTime) {
     const wasm = this.wasm;
     const pending = this.pendingLoad;
     if (!wasm || !pending) return;
@@ -197,6 +228,10 @@ class SpcProcessor extends AudioWorkletProcessor {
     this.trackBytes = pending.bytes;
     this.resampler?.reset();
     this.audibleFrame = 0;
+    this.clockContextTime = atContextTime;
+    this.spectrumGeneration = wasm.web_spc_generation();
+    this.spectrumFrame = 0;
+    ++this.spectrumDiscontinuity;
     this.snapshotClock = 0;
     this.renderFailed = false;
     this.paused = pending.paused;
@@ -229,6 +264,8 @@ class SpcProcessor extends AudioWorkletProcessor {
       this.beginRamp(0);
     } else {
       this.pendingPauseCommandId = null;
+      // Media time stops while paused even though the context clock advances.
+      if (!this.playing) this.clockContextTime = currentTime;
       this.playing = true;
       this.beginRamp(this.volume);
       this.publishState(commandId);
@@ -239,6 +276,7 @@ class SpcProcessor extends AudioWorkletProcessor {
     this.post({
       type: 'state', commandId, playing: this.playing, paused: this.paused,
       generation: this.wasm?.web_spc_generation() ?? 0, audibleFrame: this.audibleFrame,
+      contextTime: this.clockContextTime,
       droppedSnapshots: this.droppedSnapshots,
     });
   }
@@ -246,8 +284,11 @@ class SpcProcessor extends AudioWorkletProcessor {
   private failLoad(loadId: number, message: string) {
     if (this.pendingLoad && this.pendingLoad.loadId <= loadId) this.pendingLoad = null;
     if (this.trackBytes && !this.paused) {
+      const resumed = !this.playing;
+      if (resumed) this.clockContextTime = currentTime;
       this.playing = true;
       this.beginRamp(this.volume);
+      if (resumed) this.publishState();
     }
     this.post({ type: 'error', loadId, fatal: false, message });
   }
@@ -265,7 +306,23 @@ class SpcProcessor extends AudioWorkletProcessor {
     while (resampler.neededInputFrames(outputFrames) > 0) {
       const frames = Math.min(RENDER_FRAMES, resampler.neededInputFrames(outputFrames));
       if (wasm.web_spc_render(this.renderPointer, frames) !== 0) return false;
-      const samples = new Int16Array(wasm.memory.buffer, this.renderPointer, frames * 2);
+      const samples = this.renderSamples[frames];
+      // Native pre-volume samples travel directly to a dedicated analysis owner.
+      // No FFT, buffer allocation or main-thread PCM traffic occurs here.
+      if (this.spectrumPort) {
+        const slot = this.spectrumPool.pop();
+        if (slot) {
+          for (let i = 0; i < frames * 2; ++i) slot.samples[i] = samples[i];
+          const packet = slot.packet;
+          packet.generation = this.spectrumGeneration;
+          packet.nativeFrame = this.spectrumFrame;
+          packet.frames = frames;
+          packet.discontinuity = this.spectrumDiscontinuity;
+          packet.dropped = this.spectrumDropped;
+          this.spectrumPort.postMessage(packet, slot.transfer);
+        } else ++this.spectrumDropped;
+      }
+      this.spectrumFrame += frames;
       resampler.push(samples);
     }
     return true;
@@ -338,10 +395,11 @@ class SpcProcessor extends AudioWorkletProcessor {
       right[index] *= this.gain;
     }
     this.audibleFrame += (produced * NATIVE_RATE) / sampleRate;
+    this.clockContextTime = currentTime + produced / sampleRate;
     this.snapshotClock += produced;
     if (this.rampRemaining === 0 && this.gain === 0) {
       if (this.pendingLoad) {
-        this.commitPendingLoad();
+        this.commitPendingLoad(currentTime + produced / sampleRate);
       } else if (this.paused && this.playing) {
         this.playing = false;
         this.publishState(this.pendingPauseCommandId ?? undefined);

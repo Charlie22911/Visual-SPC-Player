@@ -109,6 +109,33 @@ test.each(['map', 'waterfall'] as const)('%s paints every publication before a R
   }
 });
 
+test('switching off Waterfall cancels pending backfill and leaves its canvas untouched', () => {
+  const callbacks = new Map<number, FrameRequestCallback>(); let nextId = 0;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callbacks.set(++nextId, callback); return nextId; });
+  const cancel = vi.fn((id: number) => callbacks.delete(id)); vi.stubGlobal('cancelAnimationFrame', cancel);
+  const props = { ...setup(), geometry: 'waterfall' as const };
+  props.history.accept(makeSnapshot(1, { frame: 0 }), 0);
+  const sample = makeSnapshot(2, { frame: 7000 }); props.history.accept(sample, 0); props.stream.publish(sample);
+  act(() => root.render(createElement(AramPanel, props)));
+  act(() => root.render(createElement(AramPanel, { ...props, geometry: 'map' })));
+  if (nextId) expect(cancel).toHaveBeenCalled();
+  const rowsBefore = paints.mock.calls.filter(call => call[0]?.height === 1).length;
+  props.history.accept(makeSnapshot(3, { frame: 7100 }), 0); props.stream.publish(makeSnapshot(3, { frame: 7100 }));
+  expect(paints.mock.calls.filter(call => call[0]?.height === 1)).toHaveLength(rowsBefore);
+  expect(callbacks.size).toBe(0);
+});
+
+test('sampling and temporal controls preserve separate Map and Waterfall settings', () => {
+  const props = { ...setup(), mapSampling: 'area' as const, waterfallSampling: 'smooth' as const, waterfallTemporal: true, waterfallTemporalMs: 80, onMapSamplingChange: vi.fn(), onWaterfallSamplingChange: vi.fn(), onWaterfallTemporalChange: vi.fn(), onWaterfallTemporalMsChange: vi.fn() };
+  act(() => root.render(createElement(AramPanel, props)));
+  expect((container.querySelector('[aria-label="Map sampling"]') as HTMLSelectElement).value).toBe('area');
+  act(() => root.render(createElement(AramPanel, { ...props, geometry: 'waterfall' })));
+  expect((container.querySelector('[aria-label="Waterfall sampling"]') as HTMLSelectElement).value).toBe('smooth');
+  expect((container.querySelector('[aria-label="Waterfall temporal window milliseconds"]') as HTMLInputElement).value).toBe('80');
+  act(() => (container.querySelector('[aria-label="Waterfall temporal filter"]') as HTMLInputElement).click());
+  expect(props.onWaterfallTemporalChange).toHaveBeenCalledWith(false);
+});
+
 test.each(['map', 'waterfall'] as const)('%s wheel zoom consumes page scrolling without a passive-listener warning', geometry => {
   act(() => root.render(createElement(AramPanel, { ...setup(), geometry })));
   const target = container.querySelector(geometry === 'map' ? '.map-stage' : '.waterfall-plot')!;
@@ -132,7 +159,7 @@ test('selected partial-band inspection follows the same latest value as its pixe
   expect([...rowImage.data.subarray(0, 4)]).toEqual([200, 200, 200, 255]);
   expect(container.querySelector('.waterfall-inspector')!.textContent).toContain('Mean 200.00');
 });
-test.each([1, 2])('waterfall 1:1 uses CSS columns at DPR %i and restores both viewports', dpr => {
+test.each([1, 2])('waterfall 1:1 uses physical columns at DPR %i and restores both viewports', dpr => {
   vi.stubGlobal('devicePixelRatio', dpr);
   const props = setup(); act(() => root.render(createElement(AramPanel, props)));
   act(() => (container.querySelector('.zoom-controls button:nth-child(3)') as HTMLButtonElement).click());
@@ -140,11 +167,11 @@ test.each([1, 2])('waterfall 1:1 uses CSS columns at DPR %i and restores both vi
   act(() => root.render(createElement(AramPanel, { ...props, geometry: 'waterfall' })));
   act(() => (container.querySelector('.zoom-controls button:nth-child(3)') as HTMLButtonElement).click());
   const c = container.querySelector('.waterfall-plot canvas') as HTMLCanvasElement;
-  expect(c.dataset.span).toBe('512'); expect(c.width).toBe(512 * dpr);
+  expect(c.dataset.span).toBe(String(512 * dpr)); expect(c.width).toBe(512 * dpr);
   act(() => root.render(createElement(AramPanel, props)));
   expect(container.querySelector('.map-stage canvas')!.getAttribute('style')).toBe(mapTransform);
   act(() => root.render(createElement(AramPanel, { ...props, geometry: 'waterfall', mode: 'entropy', playing: false })));
-  expect(c.dataset.span).toBe('512');
+  expect(c.dataset.span).toBe(String(512 * dpr));
   const before = paints.mock.calls.length;
   act(() => root.render(createElement(AramPanel, { ...props, geometry: 'waterfall', mode: 'entropy', playing: false, palette: 'original' })));
   expect(paints.mock.calls.length).toBeGreaterThan(before);
@@ -159,21 +186,22 @@ test.each([1, 2])('Bits waterfall 1:1 resolves horizontal bits at DPR %i with th
   act(() => root.render(createElement(AramPanel, props)));
   act(() => (container.querySelector('.zoom-controls button:nth-child(3)') as HTMLButtonElement).click());
   const c = container.querySelector('.waterfall-plot canvas') as HTMLCanvasElement;
-  expect(c.dataset.span).toBe('64'); expect(c.dataset.columns).toBe('64');
+  expect(c.dataset.span).toBe(String(64 * dpr)); expect(c.dataset.columns).toBe(String(64 * dpr));
   expect(c.width).toBe(512 * dpr); expect(c.height).toBe(256 * dpr);
   const plot = container.querySelector('.waterfall-plot')!;
   const inspect = (x: number, y: number) => {
     act(() => plot.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: y })));
     return container.querySelector('.waterfall-inspector')!.textContent;
   };
-  expect(inspect(0, 0)).toContain('$7FE0 · 0.020–0.039 s · Bit 7: 100.0% set');
-  expect(inspect(7, 0)).toContain('$7FE0 · 0.020–0.039 s · Bit 0: 100.0% set');
-  expect(inspect(8, 0)).toContain('$7FE1 · 0.020–0.039 s · Bit 7: 100.0% set');
-  expect(inspect(7, 1)).toContain('$7FE0 · 0.000–0.020 s · Bit 0: 100.0% set');
+  const address = dpr === 1 ? '$7FE0' : '$7FC0';
+  expect(inspect(0, 0)).toContain(`${address} · ${dpr === 1 ? '0.020–0.039' : '0.029–0.039'} s · Bit 7: 100.0% set`);
+  expect(inspect(7 / dpr, 0)).toContain(`${address} · ${dpr === 1 ? '0.020–0.039' : '0.029–0.039'} s · Bit 0: 100.0% set`);
+  expect(inspect(8 / dpr, 0)).toContain(`${dpr === 1 ? '$7FE1' : '$7FC1'} · ${dpr === 1 ? '0.020–0.039' : '0.029–0.039'} s · Bit 7: 100.0% set`);
+  expect(inspect(7 / dpr, 1 / dpr)).toContain(`${address} · ${dpr === 1 ? '0.000–0.020' : '0.020–0.029'} s · Bit 0: 100.0% set`);
   act(() => root.render(createElement(AramPanel, { ...props, mode: 'data', dataUnit: 'byte' })));
-  expect(c.dataset.span).toBe('512'); expect(c.dataset.columns).toBe('512');
+  expect(c.dataset.span).toBe(String(512 * dpr)); expect(c.dataset.columns).toBe(String(512 * dpr));
   act(() => root.render(createElement(AramPanel, props)));
-  expect(c.dataset.span).toBe('64'); expect(c.dataset.columns).toBe('64');
+  expect(c.dataset.span).toBe(String(64 * dpr)); expect(c.dataset.columns).toBe(String(64 * dpr));
 });
 
 test('Data controls show actual XOR bits while leaving representation and frame cadence independent', () => {
@@ -204,4 +232,15 @@ test('Map entropy bit lanes and numeric readings distinguish fixed and varying b
   act(() => root.render(createElement(AramPanel, { ...props, entropyUnit: 'byte' })));
   act(() => plot.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 128, clientY: 0 })));
   expect(container.querySelector('.map-metric-inspector')!.textContent).toContain('1.000 bits/byte');
+});
+
+test('Map inspection reports exact bytes, interval accesses, and unavailable XOR baselines', () => {
+  const props = { ...setup(), mode: 'data' as const };
+  const sample = makeSnapshot(1, { ram: r => { r[1] = 0xab; }, activity: r => { r[0] = 2; } });
+  props.history.accept(sample, 0); props.stream.publish(sample);
+  act(() => root.render(createElement(AramPanel, props)));
+  const inspect = () => act(() => container.querySelector('.map-stage')!.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 129, clientY: 0 })));
+  inspect(); expect(container.querySelector('.map-metric-inspector')!.textContent).toContain('$0001 · $AB · Read');
+  act(() => root.render(createElement(AramPanel, { ...props, dataXor: true })));
+  inspect(); expect(container.querySelector('.map-metric-inspector')!.textContent).toContain('$0001 · Baseline unavailable · Read');
 });

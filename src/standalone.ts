@@ -1,6 +1,8 @@
 export type StandaloneAssets = {
   workletBase64: string;
   wasmBase64: string;
+  spectrumWasmBase64?: string;
+  projectSourceBase64?: string;
   noticesBase64: string;
   sourceBase64: string;
   buildId: string;
