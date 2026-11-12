@@ -28,7 +28,7 @@ const load = async page => {
 };
 // Read diagnostics from existing React state, without a production debug API.
 // The scan identifies values by their contracts rather than bundled names.
-const sample = page => page.evaluate(() => {
+const readSample = drainedOnly => {
   const element = document.querySelector('.waterfall-plot') ?? document.querySelector('.aram-panel');
   let fiber = element[Object.keys(element).find(key => key.startsWith('__reactFiber$'))];
   let stream, history, renderer, stats, presentation;
@@ -43,6 +43,7 @@ const sample = page => page.evaluate(() => {
     }
   }
   if (!stream || !history || !presentation) throw new Error('Runtime diagnostics were not found');
+  if (drainedOnly) return presentation.pending.length === 0;
   const records = [...history.records()];
   return {
     received: stream.received, presented: stream.presented, fresh: stream.fresh, draws: stream.draws,
@@ -54,7 +55,8 @@ const sample = page => page.evaluate(() => {
     pending: renderer?.pendingCount ?? 0, stats, status: document.querySelector('.visual-status')?.textContent,
     time: document.querySelector('.transport time')?.textContent,
   };
-});
+};
+const sample = page => page.evaluate(readSample);
 const checkHistory = sample => {
   // Every state in ten seconds plus the cutoff predecessor and a small reserve.
   assert(sample.payloadBytes <= (sample.records + 2) * (90400 + 24576));
@@ -128,7 +130,9 @@ await page.mouse.wheel(0, -500); await page.waitForTimeout(150);
 assert(Number(await canvas.getAttribute('data-span')) < 65536);
 await page.mouse.down(); await page.mouse.move(bounds.x + bounds.width / 2 + 40, bounds.y + 10, { steps: 4 }); await page.mouse.up();
 assert(Number(await canvas.getAttribute('data-start')) >= 0);
-await page.getByRole('button', { name: 'Pause', exact: true }).click(); await page.waitForTimeout(150);
+await page.getByRole('button', { name: 'Pause', exact: true }).click();
+await page.getByRole('button', { name: 'Play', exact: true }).waitFor();
+await page.waitForFunction(readSample, true);
 const paused = await sample(page); await page.waitForTimeout(300); assert.equal((await sample(page)).records, paused.records);
 await page.getByRole('button', { name: 'Settings', exact: true }).click();
 await page.locator('.setting-row select').selectOption('grayscale');
