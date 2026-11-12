@@ -307,7 +307,8 @@ select:focus-visible, .waterfall-plot:focus-visible { outline: 2px solid var(--c
 .spectrum-footer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); grid-template-rows: 1.4em 1.4em; min-width: 0; column-gap: .8rem; }
 .spectrum-footer .legend, .spectrum-footer .visual-status { padding: 0; margin: 0; border: 0; background: transparent; min-width: 0; min-height: 0; font-size: inherit; line-height: 1.4; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .spectrum-footer .legend { display: block; grid-column: 1; grid-row: 1 / 3; align-self: center; }
-.spectrum-footer .visual-status { grid-column: 2; grid-row: 1 / 3; display: flex; align-items: flex-end; justify-content: center; flex-direction: column; gap: 0; max-width: 36vw; }
+.spectrum-footer .visual-status { grid-column: 2; grid-row: 1 / 3; display: flex; align-items: flex-end; justify-content: center; flex-direction: column; flex-wrap: nowrap; gap: 0; max-width: 36vw; }
+.spectrum-footer .visual-status .live-status { font: inherit; }
 .spectrum-footer .visual-status > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .spectrum-footer .visual-status > span:nth-child(2) { display: none; }
 .waterfall-temporal-window { display: inline-flex; align-items: center; gap: .25rem; color: var(--muted); font-size: .75rem; white-space: nowrap; }
