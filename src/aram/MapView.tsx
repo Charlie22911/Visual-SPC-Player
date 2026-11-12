@@ -371,7 +371,11 @@ export const MapView = forwardRef<MemoryViewHandle, Props>(function MapView({
           key={canvasFallback ? 'canvas2d' : 'gpu'}
           ref={canvasRef}
           style={{
-            transform: 'translate(' + viewport.offsetX + 'px, ' + viewport.offsetY + 'px) scale(' + viewport.scale + ')',
+            // GPU and sampled canvases already cover the viewport. Their zoom
+            // is rendered into pixels, so React must never add a CSS zoom.
+            transform: (!canvasFallback && gpu.current !== null) || mapSampling !== 'nearest'
+              ? 'none'
+              : 'translate(' + viewport.offsetX + 'px, ' + viewport.offsetY + 'px) scale(' + viewport.scale + ')',
           }}
         />
         {active && (() => { const detail = <div ref={inspector} className="map-metric-inspector" aria-live="polite">Hover or tap a memory cell to inspect it</div>; return inspectorTarget ? createPortal(detail, inspectorTarget) : detail; })()}
