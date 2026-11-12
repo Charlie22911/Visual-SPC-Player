@@ -82,12 +82,14 @@ try {
       let height;
       if (mode.startsWith('activity')) await page.getByLabel(/^Show (bytes|bits) underneath$/).check();
       for (const seconds of [2, 5, 10]) {
+        console.log('Rebuilding retained waterfall', name, mode, seconds + ' s');
         await page.getByLabel('Waterfall time span').selectOption(String(seconds));
         await page.waitForFunction(() => window.retentionRuntime().renderer.pendingCount === 0, null, { timeout: 30000 });
         const result = await page.evaluate(() => {
           const { history, renderer } = window.retentionRuntime();
           const canvas = document.querySelector('.waterfall-plot canvas');
           const config = renderer.config;
+          if (renderer.canvas !== canvas) throw new Error('Waterfall must render directly to its visible canvas');
           const checks = [1, Math.floor(config.height / 2), config.height - 1].map(y => renderer.inspect(0, y).row.valid);
           const pixel = window.readMemoryCanvas(canvas, { x: 0, y: canvas.height - 2, space: 'physical' });
           return { height: canvas.height, plotHeight: canvas.parentElement.clientHeight, dpr: devicePixelRatio,

@@ -18,6 +18,7 @@ try {
     }, failure);
     assert.deepEqual(result.map, { fresh: true, pixel: [255, 255, 255, 255] }, `${failure}: Map must render on a fresh Canvas`);
     assert.deepEqual(result.waterfall, { fresh: true, pixel: [200, 200, 200, 255] }, `${failure}: Waterfall must render on a fresh Canvas`);
+    assert.deepEqual(result.visibleWaterfall, { fresh: true, pixel: [200, 200, 200, 255] }, `${failure}: visible Waterfall must remount a fresh Canvas`);
     console.log(JSON.stringify(result));
   }
 } finally { await browser?.close(); await server.close(); }

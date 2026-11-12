@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom';
 import { MapView } from '../src/aram/MapView';
 import { MemoryHistory } from '../src/aram/history';
 import { WaterfallRenderer } from '../src/aram/waterfallRenderer';
+import { WaterfallView } from '../src/aram/WaterfallView';
 import { VisualStream } from '../src/audio/visualStream';
 import { makeSnapshot } from './helpers/snapshots';
 
@@ -20,7 +21,7 @@ export async function fallbackPixels(failure: 'shader' | 'link') {
   };
   if (failure === 'shader') WebGL2RenderingContext.prototype.getShaderParameter = function (shader, parameter) { return parameter === this.COMPILE_STATUS ? false : shaderParameter.call(this, shader, parameter); };
   else WebGL2RenderingContext.prototype.getProgramParameter = function (program, parameter) { return parameter === this.LINK_STATUS ? false : programParameter.call(this, program, parameter); };
-  const host = document.createElement('div'); host.style.cssText = 'position:fixed;left:0;top:0;width:32px;height:32px'; document.body.append(host);
+  const host = document.createElement('div'); host.style.cssText = 'position:fixed;left:0;top:0;width:320px;height:256px'; document.body.append(host);
   const root = createRoot(host);
   try {
     const history = new MemoryHistory(); history.reset(1);
@@ -37,7 +38,15 @@ export async function fallbackPixels(failure: 'shader' | 'link') {
     waterfall.configure({ mode: 'bytes', palette: 'grayscale', columns: 2, height: 4, framesPerBand: 100, window: { start: 0, span: 2 } }); waterfall.update(); waterfall.flush(Infinity);
     const waterfallContext = waterfall.canvas.getContext('2d');
     const result = { failure, map, waterfall: { fresh: !claimed.has(waterfall.canvas), pixel: waterfallContext ? [...waterfallContext.getImageData(0, 1, 1, 1).data] : null } };
-    waterfall.dispose(); return result;
+    waterfall.dispose();
+    flushSync(() => root.render(createElement(WaterfallView, { active: true, mode: 'bytes', activityByteBackground: false, seconds: 5, palette: 'grayscale', stream, generation: 1, history, displayHz: 60, onStats: () => {}, onInfo: () => {} })));
+    // ResizeObserver sizes the plot before the failed initialization schedules
+    // the fresh-canvas commit. Observe the resulting backend, not a fixed delay.
+    for (let frame = 0; frame < 60 && host.querySelector('canvas')?.dataset.renderer !== 'canvas2d'; frame++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    }
+    const visible = host.querySelector('canvas')!, visibleContext = visible.getContext('2d');
+    return { ...result, visibleWaterfall: { fresh: !claimed.has(visible), pixel: visibleContext ? [...visibleContext.getImageData(0, 0, 1, 1).data] : null } };
   } finally {
     flushSync(() => root.unmount()); host.remove();
     HTMLCanvasElement.prototype.getContext = getContext;

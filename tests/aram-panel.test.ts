@@ -16,7 +16,7 @@ beforeEach(() => {
   paints = vi.fn();
   const contexts = new WeakMap<HTMLCanvasElement, object>();
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function(this: HTMLCanvasElement) {
-    if (!contexts.has(this)) contexts.set(this, { createImageData: (w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }), putImageData: paints, drawImage: paints, clearRect: vi.fn(), fillRect: vi.fn(), setTransform: vi.fn(), imageSmoothingEnabled: false });
+    if (!contexts.has(this)) contexts.set(this, { createImageData: (w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }), putImageData: paints, drawImage: paints, clearRect: vi.fn(), fillRect: paints, setTransform: vi.fn(), imageSmoothingEnabled: false });
     return contexts.get(this) as CanvasRenderingContext2D;
   });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);

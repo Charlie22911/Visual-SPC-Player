@@ -14,7 +14,8 @@ export type WaterfallInfo = { columns: number; window: AddressWindow; retainedSe
 type Props = { active: boolean; mode: AramMode; activityByteBackground: boolean; seconds: WaterfallSeconds; palette: PalettePreset; stream: VisualStream; generation: number; history: MemoryHistory; displayHz: number | null; onStats(stats: DrawStats): void; onInfo(info: WaterfallInfo): void; waterfallSampling?: MemorySampling; waterfallTemporal?: boolean; waterfallTemporalMs?: number; inspectorTarget?: HTMLElement | null };
 export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function WaterfallView({ active, mode, activityByteBackground, seconds, palette, stream, generation, history, displayHz, onStats, onInfo, waterfallSampling = 'nearest', waterfallTemporal = false, waterfallTemporalMs = 50, inspectorTarget }, ref) {
   const plot = useRef<HTMLDivElement>(null), canvas = useRef<HTMLCanvasElement>(null);
-  const backing = useRef<HTMLCanvasElement | null>(null), renderer = useRef<WaterfallRenderer | null>(null);
+  const renderer = useRef<WaterfallRenderer | null>(null);
+  const [canvasFallback, setCanvasFallback] = useState(false);
   const job = useRef(0), inspector = useRef<HTMLDivElement>(null), crosshair = useRef<HTMLDivElement>(null), empty = useRef<HTMLDivElement>(null);
   const selected = useRef<{ pixel: number; band: number; recordId: number | null } | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -63,13 +64,17 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
     // A resize or mode change can increase the bucket count before its window
     // adjustment commits. Wait for that adjustment instead of drawing empty buckets.
     if (!active || !canvas.current || !size.width || !size.height || window.span < columns) return;
-    if (!backing.current) { renderer.current = new WaterfallRenderer(document.createElement('canvas'), history, true); backing.current = renderer.current.canvas; }
-    const view = renderer.current!, destination = canvas.current;
-    const context = destination.getContext('2d'); if (!context) return;
+    const destination = canvas.current;
+    if (!renderer.current) renderer.current = new WaterfallRenderer(destination, history, !canvasFallback);
+    const view = renderer.current;
+    if (view.canvas !== destination) {
+      // Failed GL initialization may claim the context. Remount a fresh Canvas
+      // for fallback instead of copying a second canvas into every frame.
+      view.dispose(); renderer.current = null; setCanvasFallback(true); return;
+    }
     destination.width = Math.round(width * dpr); destination.height = height;
     destination.style.width = `${width}px`; destination.style.height = `${height / dpr}px`;
     destination.dataset.renderer = view.accelerated ? 'webgl2' : 'canvas2d';
-    context.setTransform(1, 0, 0, 1, 0, 0); context.imageSmoothingEnabled = false;
     view.configure({ mode, window, columns, height, framesPerBand: seconds * 32000 / height, palette, activityByteBackground: isActivityMode(mode) && activityByteBackground, sampling: waterfallSampling, temporal: waterfallTemporal, temporalMs: waterfallTemporalMs });
     selected.current = null; if (crosshair.current) crosshair.current.hidden = true;
     if (inspector.current) inspector.current.textContent = 'Hover or tap to inspect an address and time interval';
@@ -85,11 +90,11 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       // without pointer movement. Keep the reading tied to its current pixels.
       if (!crosshair.current.hidden) inspect({ x: choice.pixel / dpr, y: y / dpr });
     };
-    const blit = () => { context.drawImage(backing.current!, 0, 0); showSelection(); if (empty.current) empty.current.hidden = history.latest() !== null; };
-    const backfill = () => { job.current = 0; view.flush(budget); blit(); if (view.pendingCount) job.current = requestAnimationFrame(backfill); };
+    const finishPaint = () => { showSelection(); if (empty.current) empty.current.hidden = history.latest() !== null; };
+    const backfill = () => { job.current = 0; view.flush(budget); finishPaint(); if (view.pendingCount) job.current = requestAnimationFrame(backfill); };
     const paint = (snapshot: Snapshot | null, live = false) => {
       if (snapshot && snapshot.generation !== generation) return;
-      const started = performance.now(); view.update(); view.flush(budget); blit();
+      const started = performance.now(); view.update(); view.flush(budget); finishPaint();
       if (snapshot && live) { const elapsed = performance.now() - started; stats.current.count++; stats.current.total += elapsed; stats.current.max = Math.max(stats.current.max, elapsed); stream.draws++; }
       if (view.pendingCount && !job.current) job.current = requestAnimationFrame(backfill);
     };
@@ -102,7 +107,7 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       stats.current = { count: 0, total: 0, max: 0, since: now }; updateInfo();
     }, 1000);
     return () => { off(); clearInterval(timer); if (job.current) cancelAnimationFrame(job.current); job.current = 0; };
-  }, [active, mode, activityByteBackground, seconds, palette, stream, generation, history, columns, width, height, size.width, size.height, window, displayHz, onStats, onInfo, dpr, waterfallSampling, waterfallTemporal, waterfallTemporalMs]);
+  }, [active, mode, activityByteBackground, seconds, palette, stream, generation, history, columns, width, height, size.width, size.height, window, displayHz, onStats, onInfo, dpr, waterfallSampling, waterfallTemporal, waterfallTemporalMs, canvasFallback]);
   useEffect(() => () => renderer.current?.dispose(), []);
   const localPoint = (event: React.PointerEvent<HTMLDivElement>) => { const rect = event.currentTarget.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; };
   const inspect = (point: { x: number; y: number }) => {
@@ -150,7 +155,7 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       }}
       onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)} onLostPointerCapture={event => finish(event, true)}
       onKeyDown={event => { if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return; event.preventDefault(); setFit(false); setWindow(current => panWindow(current, current.span * (event.shiftKey ? 0.5 : 0.1) * (event.key === 'ArrowLeft' ? -1 : 1))); }}>
-      <canvas ref={canvas} data-columns={columns} data-pixels-per-bucket={pixelsPerBucket} data-start={window.start} data-span={window.span} />
+      <canvas key={canvasFallback ? 'canvas2d' : 'gpu'} ref={canvas} data-columns={columns} data-pixels-per-bucket={pixelsPerBucket} data-start={window.start} data-span={window.span} />
       <div ref={crosshair} className="waterfall-crosshair" hidden />
       <div ref={empty} className="map-empty">Choose an SPC file to begin</div>
     </div>
