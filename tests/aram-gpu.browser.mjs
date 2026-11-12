@@ -38,11 +38,24 @@ try {
     ring.uploadRow(5, { ...row(1), byteValues: new Float32Array([200, 200]) }, 2); ring.uploadRow(4, { ...row(2), byteValues: new Float32Array([0, 0]) }, 2);
     ring.draw({ mode: 'activity', activityByteBackground: false, palette: 'grayscale', temporal: true, temporalMs: 30, framesPerBand: 320 }, 2, 4, 5);
     const activity = pixel(ring, 0, 0);
+    const { MemoryHistory } = await import('/src/aram/history.ts');
+    const { WaterfallRenderer } = await import('/src/aram/waterfallRenderer.ts');
+    const { makeSnapshot } = await import('/tests/helpers/snapshots.ts');
+    const history = new MemoryHistory(); history.reset(1);
+    history.accept(makeSnapshot(1, { frame: 0 }), 0);
+    history.accept(makeSnapshot(2, { frame: 200, ram: bytes => bytes.fill(200) }), 0);
+    const visible = document.createElement('canvas'), waterfall = new WaterfallRenderer(visible, history, true);
+    waterfall.configure({ mode: 'bytes', palette: 'grayscale', columns: 2, height: 4, framesPerBand: 100, window: { start: 0, span: 2 } });
+    waterfall.update(); waterfall.flush(Infinity, false);
+    const deferred = { rows: waterfall.pendingRows, before: waterfall.pendingCount };
+    waterfall.present(); deferred.after = waterfall.pendingCount;
+    deferred.pixel = pixel({ canvas: visible, gl: visible.getContext('webgl2') }, 0, 1);
+    waterfall.dispose();
     const sampleTarget = new Uint8ClampedArray(1024 * 512 * 4);
     const startedCpu = performance.now(); for (let i = 0; i < 60; i++) renderAram('bits', ram, null, null, i, 'spectrum', sampleTarget); const cpuMs = performance.now() - startedCpu;
     const startedGpu = performance.now(); for (let i = 0; i < 60; i++) { map.uploadMap(ram, access, held, entropy); map.draw({ mode: 'bits', palette: 'spectrum' }, 1024, 512, 0, { scale: 1, offsetX: 0, offsetY: 0 }); } const gpuSubmissionMs = performance.now() - startedGpu;
     const error = gl.getError(); map.dispose(); ring.dispose();
-    return { colors, nonlinearExpected: bytePalette(128, 'spectrum'), xorLanes, chronological, filtered, gap, activity, error, cpuMs, gpuSubmissionMs };
+    return { colors, nonlinearExpected: bytePalette(128, 'spectrum'), xorLanes, chronological, filtered, gap, activity, deferred, error, cpuMs, gpuSubmissionMs };
   });
   assert.deepEqual(results.colors.nearest, [255, 255, 255, 255]);
   assert.deepEqual(results.colors.smooth, [128, 128, 128, 255]);
@@ -53,6 +66,7 @@ try {
   assert.deepEqual(results.filtered, [57, 57, 57, 255]);
   assert.deepEqual(results.gap, [16, 23, 34, 255]);
   assert.deepEqual(results.activity, [42, 168, 255, 255]);
+  assert.deepEqual(results.deferred, { rows: 0, before: 1, after: 0, pixel: [200, 200, 200, 255] });
   assert.equal(results.error, 0);
   console.log(JSON.stringify(results, null, 2));
 } finally { await browser?.close(); await server.close(); }

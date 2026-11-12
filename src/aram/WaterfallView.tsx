@@ -91,12 +91,28 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       if (!crosshair.current.hidden) inspect({ x: choice.pixel / dpr, y: y / dpr });
     };
     const finishPaint = () => { showSelection(); if (empty.current) empty.current.hidden = history.latest() !== null; };
-    const backfill = () => { job.current = 0; view.flush(budget); finishPaint(); if (view.pendingCount) job.current = requestAnimationFrame(backfill); };
+    // Backfill makes progress between display callbacks. Upload bounded chunks
+    // without redrawing the whole plot for every chunk, then present once per
+    // animation frame. Slow software graphics must not throttle row processing.
+    const work = new MessageChannel();
+    let stopped = false, queued = false;
+    const queueWork = () => {
+      if (!stopped && !queued && view.pendingRows) { queued = true; work.port2.postMessage(0); }
+    };
+    work.port1.onmessage = () => {
+      queued = false; if (stopped || history.latest()?.generation !== generation) return;
+      view.flush(Math.min(2, budget), false);
+      if (!job.current) job.current = requestAnimationFrame(() => {
+        job.current = 0; if (stopped) return;
+        view.present(); finishPaint();
+      });
+      queueWork();
+    };
     const paint = (snapshot: Snapshot | null, live = false) => {
       if (snapshot && snapshot.generation !== generation) return;
       const started = performance.now(); view.update(); view.flush(budget); finishPaint();
       if (snapshot && live) { const elapsed = performance.now() - started; stats.current.count++; stats.current.total += elapsed; stats.current.max = Math.max(stats.current.max, elapsed); stream.draws++; }
-      if (view.pendingCount && !job.current) job.current = requestAnimationFrame(backfill);
+      queueWork();
     };
     stats.current = { count: 0, total: 0, max: 0, since: performance.now() };
     paint(stream.latest?.generation === generation ? stream.latest : null); updateInfo();
@@ -106,7 +122,7 @@ export const WaterfallView = forwardRef<MemoryViewHandle, Props>(function Waterf
       onStats({ rate: Math.round(measurements.count * 1000 / Math.max(1, now - measurements.since)), averageMs: measurements.count ? measurements.total / measurements.count : 0, maxMs: measurements.max });
       stats.current = { count: 0, total: 0, max: 0, since: now }; updateInfo();
     }, 1000);
-    return () => { off(); clearInterval(timer); if (job.current) cancelAnimationFrame(job.current); job.current = 0; };
+    return () => { stopped = true; work.port1.close(); work.port2.close(); off(); clearInterval(timer); if (job.current) cancelAnimationFrame(job.current); job.current = 0; };
   }, [active, mode, activityByteBackground, seconds, palette, stream, generation, history, columns, width, height, size.width, size.height, window, displayHz, onStats, onInfo, dpr, waterfallSampling, waterfallTemporal, waterfallTemporalMs, canvasFallback]);
   useEffect(() => () => renderer.current?.dispose(), []);
   const localPoint = (event: React.PointerEvent<HTMLDivElement>) => { const rect = event.currentTarget.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; };

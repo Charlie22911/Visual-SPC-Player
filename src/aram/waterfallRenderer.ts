@@ -123,6 +123,7 @@ export class WaterfallRenderer {
   private image: ImageData | null = null;
   private readonly gpu: NumericGpu | null;
   private slots = new Float64Array(0);
+  private presentationPending = false;
   constructor(readonly canvas: HTMLCanvasElement, private readonly history: MemoryHistory, useGpu = false) {
     this.gpu = useGpu ? NumericGpu.create(canvas, true) : null;
     // Once WebGL has claimed a canvas, a later initialization failure cannot
@@ -131,7 +132,8 @@ export class WaterfallRenderer {
   }
   get accelerated() { return this.gpu !== null; }
   get currentBand() { return this.newestBand; }
-  get pendingCount() { return this.pending.size; }
+  get pendingCount() { return this.pending.size + (this.presentationPending ? 1 : 0); }
+  get pendingRows() { return this.pending.size; }
   get config() { return this.options; }
   configure(options: WaterfallOptions) {
     if (JSON.stringify(this.options) === JSON.stringify(options)) return;
@@ -189,7 +191,7 @@ export class WaterfallRenderer {
       for (const k of this.pending) { const slot = ((k % bands) + bands) % bands; if (this.slots[slot] !== k) { this.gpu.invalidateRow(k); this.slots[slot] = k; } }
     }
   }
-  flush(budgetMs = 4) {
+  flush(budgetMs = 4, present = true) {
     const options = this.options, context = this.gpu ? null : this.canvas.getContext('2d'); if (!options || (!context && !this.gpu)) return;
     const started = performance.now(), lanes = isBitMode(options.mode) ? 8 : 1;
     if (!this.image && context) this.image = context.createImageData(options.columns * lanes, 1);
@@ -204,7 +206,7 @@ export class WaterfallRenderer {
     };
     for (const k of dirty) {
       const band = composeBand(this.history, this.cache, options, k);
-      if (this.gpu) { this.gpu.uploadRow(k, band.row, options.columns); this.pending.delete(k); if (performance.now() - started >= budgetMs) break; continue; }
+      if (this.gpu) { this.gpu.uploadRow(k, band.row, options.columns); this.presentationPending = true; this.pending.delete(k); if (performance.now() - started >= budgetMs) break; continue; }
       const data = this.image!.data;
       if (radius && band.row.valid) {
         // Smooth measurements/underlays causally, preserving this band's exact
@@ -225,9 +227,9 @@ export class WaterfallRenderer {
       context!.putImageData(this.image!, 0, this.newestBand - k); this.pending.delete(k);
       if (performance.now() - started >= budgetMs) break;
     }
-    this.present();
+    if (present) this.present();
   }
-  present() { if (this.gpu && this.options) this.gpu.draw(this.options, this.canvas.width, this.canvas.height, this.newestBand); }
+  present() { if (this.gpu && this.options) this.gpu.draw(this.options, this.canvas.width, this.canvas.height, this.newestBand); this.presentationPending = false; }
   dispose() { this.gpu?.dispose(); }
   inspect(pixel: number, y: number) {
     if (!this.options) return null;
